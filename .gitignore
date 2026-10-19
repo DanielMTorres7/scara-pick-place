@@ -1,0 +1,7 @@
+# fotos de trabalho da câmera (podem mostrar pessoas e o ambiente): não vão para o repositório
+fotos/
+__pycache__/
+*.pyc
+# segredos: a chave do Gemini fica no .env do only-vision, nunca aqui
+.env
+*.env
