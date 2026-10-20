@@ -43,16 +43,17 @@ def faixa(s):
     return [a + i * p for i in range(n + 1)]
 
 
-def coletar(seq, prev, saida):
+def coletar(seq, prev, saida, fator=1.0):
     from cam import Cam
     from ponta import ponta_precisa
     from scara import Scara
-    r = Scara(); c = Cam(); dados = []
+    r = Scara(fator_vel=min(0.2 * fator, 1.0)); c = Cam(); dados = []
+    vel = {k: v * fator for k, v in VEL.items()}; acel = {k: v * fator for k, v in ACEL.items()}
     try:
         for i, (j1, j2, z) in enumerate(seq):
             if not dados or (dados[-1]["j1"], dados[-1]["j2"]) != (j1, j2):
                 r.ir("z", max(zz for _, _, zz in seq))          # troca de pose sempre no Z mais alto
-                r.ir_juntas(j1, j2, vmax=VEL, amax=ACEL)
+                r.ir_juntas(j1, j2, vmax=vel, amax=acel)
             r.ir("z", z); time.sleep(0.3)
             p = ponta_precisa(c.foto())
             if p and math.dist(p, prev[(j1, j2)]) > DIST_MAX_PX:
@@ -77,6 +78,7 @@ if __name__ == "__main__":
     ap.add_argument("--j2", default="-100:130:30")
     ap.add_argument("--z", default="-40,10")
     ap.add_argument("--saida", default="dados_grade.json")
+    ap.add_argument("--fator", type=float, default=1.0, help="multiplica velocidade e aceleração")
     ap.add_argument("--simular", action="store_true", help="só lista as poses")
     a = ap.parse_args()
     centro = tuple(float(v) for v in a.centro.split(","))
@@ -92,4 +94,4 @@ if __name__ == "__main__":
     if a.simular:
         for j in poses: print(j, [round(v) for v in prev[j]])
     else:
-        coletar(seq, prev, a.saida)
+        coletar(seq, prev, a.saida, a.fator)
