@@ -23,7 +23,8 @@ LENTO = ({"j1": 30.0, "j2": 40.0}, {"j1": 60.0, "j2": 60.0})
 LIMITE_PX = 8.0                  # ~4 mm: acima disso a junta perdeu passo
 PASSO_GANHO = 3.0                # ° de junta para medir quantos px a ponta anda por grau
 LIMITE_Z_MM = 1.0
-VAI_VOLTA = 2
+VAI_VOLTA = 5                    # ciclos por degrau: uma perda pequena por ciclo cresce acima do ruído (~3 px)
+N_FOTOS = 5                      # mediana da ponta em cada conferência
 SHOW = [(-60.0, -60.0), (60.0, 100.0), (-30.0, 40.0), (45.0, -40.0), (0.0, 80.0)]
 
 
@@ -44,21 +45,37 @@ def perda_graus(erro, g):
     return float(np.dot(erro, g) / np.dot(g, g))
 
 
+XADREZ = (5, 6)                  # cantos internos visíveis do tabuleiro da mesa (os cabos tapam o resto)
+
+
+def cantos_xadrez(f):
+    """cantos internos do tabuleiro verde/marrom (px) ou None"""
+    m = cv2.inRange(cv2.cvtColor(f, cv2.COLOR_BGR2HSV), (40, 60, 60), (90, 255, 255))
+    g = 255 - cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    ok, c = cv2.findChessboardCornersSB(g, XADREZ, flags=cv2.CALIB_CB_EXHAUSTIVE)
+    return c.reshape(-1, 2) if ok else None
+
+
 def mov_camera(f0, f1):
-    """transformação 2x3 (rotação + translação + escala) do fundo entre duas fotos: a câmera se mexeu?"""
-    o = cv2.ORB_create(4000)
-    k0, d0 = o.detectAndCompute(cv2.cvtColor(f0, cv2.COLOR_BGR2GRAY), None)
-    k1, d1 = o.detectAndCompute(cv2.cvtColor(f1, cv2.COLOR_BGR2GRAY), None)
-    mt = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True).match(d0, d1)
-    p0 = np.float32([k0[m.queryIdx].pt for m in mt]); p1 = np.float32([k1[m.trainIdx].pt for m in mt])
-    M, _ = cv2.estimateAffinePartial2D(p0, p1, ransacReprojThreshold=3)
-    if M is None:
-        raise RuntimeError("não deu para comparar o fundo entre as fotos")
+    """transformação 2x3 da câmera entre duas fotos, pelos cantos do tabuleiro parado na mesa.
+    (O fundo inteiro não serve: a tela do notebook rolando arrasta a estimativa.)"""
+    c0, c1 = cantos_xadrez(f0), cantos_xadrez(f1)
+    if c0 is None or c1 is None:
+        raise RuntimeError("tabuleiro não encontrado: sem ele não dá para saber se a câmera se mexeu")
+    if np.mean(np.hypot(*(c1[::-1] - c0).T)) < np.mean(np.hypot(*(c1 - c0).T)):
+        c1 = c1[::-1]                              # o detector pode numerar a partir do canto oposto
+    M, _ = cv2.estimateAffinePartial2D(c0, c1, method=cv2.LMEDS)
     return M
 
 
 def aplica(M, p):
     return tuple(M[:, :2] @ np.asarray(p, float) + M[:, 2])
+
+
+def ponta_mediana(fs, esperado=None):
+    """mediana da ponta em várias fotos (o detector varia ~3 px de uma foto para outra)"""
+    ps = [p for p in (ponta_precisa(f, esperado=esperado) for f in fs) if p is not None]
+    return tuple(np.median(ps, axis=0)) if ps else None
 
 
 class Demo:
@@ -67,26 +84,27 @@ class Demo:
         self.r = Scara(); self.c = Cam()
         for p in ("braco", "z"):
             self.r.energizar(p)
-        self.ref_f = self.foto_na_ref()
-        self.ref_px = ponta_precisa(self.ref_f)
+        fs = self.fotos_na_ref()
+        self.ref_f = fs[0]
+        self.ref_px = ponta_mediana(fs)
         if self.ref_px is None:
             raise RuntimeError("ponta não encontrada na pose de referência")
         self.g = {k: self.ganho(k) for k in RED}
         print("referência da ponta:", self.ref_px, "px/°:", {k: np.round(v, 2).tolist() for k, v in self.g.items()})
 
-    def foto_na_ref(self):
+    def fotos_na_ref(self, n=N_FOTOS):
         self.r.ir("z", REF[2])
         self.r.ir_juntas(REF[0] - 10, REF[1] - 10, *LENTO)   # chega sempre pelo mesmo lado (folga)
         self.r.ir_juntas(REF[0], REF[1], *LENTO)
-        time.sleep(0.5)
-        return self.c.foto()
+        time.sleep(0.8)
+        return [self.c.foto(descarta=2) for _ in range(n)]
 
     def ganho(self, eixo):
         """px que a ponta anda na imagem por grau da junta, na pose de referência"""
         q = {"j1": REF[0], "j2": REF[1]}; q[eixo] += PASSO_GANHO
-        self.r.ir_juntas(q["j1"], q["j2"], *LENTO); time.sleep(0.5)
-        p = ponta_precisa(self.c.foto(), esperado=self.ref_px)
-        self.foto_na_ref()
+        self.r.ir_juntas(q["j1"], q["j2"], *LENTO); time.sleep(0.8)
+        p = ponta_mediana([self.c.foto(descarta=2) for _ in range(N_FOTOS)], esperado=self.ref_px)
+        self.fotos_na_ref(n=0)
         return (np.subtract(p, self.ref_px)) / PASSO_GANHO
 
     def junta(self, eixo, rpm, n=VAI_VOLTA):
@@ -112,12 +130,12 @@ class Demo:
 
     def erro_juntas(self, eixo):
         """(px, graus perdidos, px que a câmera andou), já descontando o movimento da câmera"""
-        f = self.foto_na_ref()
-        M = mov_camera(self.ref_f, f)
+        fs = self.fotos_na_ref()
+        M = mov_camera(self.ref_f, fs[0])
         esp = aplica(M, self.ref_px)
-        p = ponta_precisa(f, esperado=esp)
+        p = ponta_mediana(fs, esperado=esp)
         if p is None:                        # perdeu muito: o hexágono mais próximo do previsto, como estimativa
-            h = acha_ponta(f, perto=esp)
+            h = acha_ponta(fs[0], perto=esp)
             if h is None:
                 raise RuntimeError("ponta não encontrada: perdeu passo demais para medir pela câmera")
             p = h["c"]
@@ -133,6 +151,8 @@ class Demo:
     def teste(self, eixos=("j1", "j2", "z"), degraus=DEGRAUS):
         seguro = {}
         for eixo in eixos:
+            if eixo == "z":
+                print("Z referenciado no fim de curso: %+.2f mm do que a placa achava" % self.erro_z())
             for rpm in degraus:
                 print("%s a %d rpm" % (eixo, rpm))
                 if eixo == "z":
