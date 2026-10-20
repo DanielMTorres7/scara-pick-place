@@ -40,8 +40,10 @@ def acel(v, delta):
     return 2 * v * v / abs(delta)
 
 
-# medido em 2026-10-20 (demo.py teste, 5 ciclos, perda < 0,5° / 0,1 mm): rpm no motor e °/s² (Z: só rpm)
-LIMITES = {"j1": (300, 150.0), "j2": (400, 500.0), "z": (500, None)}
+# medido em 2026-10-20 (demo.py teste, 5 ciclos, perda < 0,5° / 0,1 mm): rpm no motor e °/s² (Z: só rpm).
+# J2 sozinho aguenta 500 °/s², mas a reação arrasta o J1 (-0,85° em 5 ciclos). Com as duas juntas juntas
+# (show, 3 voltas): 150/300 °/s² perdeu 3,45° no J1; 100/200 °/s² perdeu 0,44°.
+LIMITES = {"j1": (300, 100.0), "j2": (400, 200.0), "z": (500, None)}
 
 
 def limita(eixo, rpm, curso):
@@ -200,7 +202,7 @@ class Demo:
 
     def show(self, rpm, voltas):
         lim = {k: limita(k, rpm, CURSO[k][1] - CURSO[k][0]) for k in RED}
-        vj = {k: v for k, (v, _) in lim.items()}; aj = {k: a for k, (_, a) in lim.items()}
+        vj = {k: v for k, (v, _) in lim.items()}; aj = {k: a * self.acel_fator for k, (_, a) in lim.items()}
         f = vel("z", min(rpm, LIMITES["z"][0])) / EIXOS["z"]["v"]
         print("show: %s, Z %.0f mm/s" % (", ".join("%s %.0f °/s %.0f °/s²" % (k, vj[k], aj[k]) for k in RED), f * EIXOS["z"]["v"]))
         for _ in range(voltas):
@@ -210,6 +212,8 @@ class Demo:
         e, d, cam = self.erro_juntas()
         print("ponta a %.1f px da referência: %s (câmera andou %.0f px, descontado)" % (
             e, ", ".join("%s %+.2f°" % kv for kv in d.items()), cam))
+        if any(abs(v) > LIMITE_GRAUS for v in d.values()):
+            self.corrige(d)
         return d
 
     def corrige(self, d):
