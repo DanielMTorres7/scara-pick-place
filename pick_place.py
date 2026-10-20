@@ -17,6 +17,7 @@ import numpy as np
 from bomba import Bomba
 from caixa import acha_caixas
 from cam import Cam
+from job_os import CaixaInalcancavel
 from modelo import ALTURA_CAIXA, Z_TOQUE_MESA, Modelo
 from ponta import ponta_precisa
 from scara import Scara
@@ -86,12 +87,14 @@ def nomes_gemini(f, caixas):
 
 
 class PickPlace:
-    def __init__(self):
+    def __init__(self, com_nomes=True):
         self.m = Modelo()
         self.r = Scara(fator_vel=1.0)
         self.c = Cam()
         self.obstaculo = None      # polígono da coletora em mm (referencial do robô)
         self.bomba = Bomba()
+        self.com_nomes = com_nomes  # lê os nomes das caixas com o Gemini (só precisa quando a OS pede remédios)
+        self._solta = []
 
     def fechar(self):
         self.c.fechar()
@@ -158,76 +161,97 @@ class PickPlace:
         solta = [(float(cx + u[0] * t), float(cy + u[1] * t)) for t in ts]
         return col, caixas, solta, (cx, cy, comp)
 
-    def rodar(self, nome=None, alvo_px=None, ordem=None):
+    # ---- executor da OS (job_os.JobOS): preparar -> pegar(caixa) por caixa -> estacionar ----
+    def preparar(self):
+        """sobe, recolhe o braço, fotografa a mesa e planeja: devolve as caixas de remédio (com "nome" se com_nomes)"""
         r, m = self.r, self.m
         self.bomba.rele(RELE_REPOUSO)        # percurso começa com o relé ligado
-        if r.posicao("z") < Z_ALTO:
-            r.ir("z", Z_ALTO)
-        r.ir_juntas(*PARQUE)
+        self.estacionar()
         for p in r.placas.values():
             p.eventos.clear()
         f = self.c.foto("fotos/pp_mesa.jpg")
-        col, caixas, solta, (cx, cy, comp) = self.planejar(f)
-        if alvo_px:                           # caixa indicada à mão (ex.: cortada na borda da imagem)
-            caixas = [{"centro": alvo_px, "nome": nome or "", "cantos": []}]
-        elif ordem:                           # todas as caixas dos remédios da lista, na ordem da lista
+        col, caixas, self._solta, (cx, cy, comp) = self.planejar(f)
+        if self.com_nomes:
             nomes_gemini(f, caixas)
             for k in caixas:
                 print("   caixa px (%.0f, %.0f): %s" % (*k["centro"], k["nome"] or "?"))
-            pos_lista = lambda k: next((i for i, n in enumerate(ordem) if mesmo_nome(n, k["nome"])), None)
-            caixas = sorted([k for k in caixas if pos_lista(k) is not None], key=pos_lista)
-            if not caixas:
-                print("nenhuma caixa da lista encontrada: o braço não se move")
-                return
-        elif nome:
-            nomes_gemini(f, caixas)
+        else:
             for k in caixas:
-                print("   caixa px (%.0f, %.0f): %s" % (*k["centro"], k["nome"] or "?"))
-            caixas = [k for k in caixas if mesmo_nome(nome, k["nome"])]
-            if not caixas:
-                print("nenhuma caixa de %s encontrada: o braço não se move" % nome)
-                return
+                k["nome"] = ""
         print("coletora: centro (%.0f, %.0f) mm, boca %.0f mm; %d caixas de remédio" % (cx, cy, comp, len(caixas)))
         vis = f.copy()
         cv2.drawContours(vis, [np.int32(col["cantos"])], -1, (0, 165, 255), 3)
         for k in caixas:
             if len(k["cantos"]):
                 cv2.drawContours(vis, [np.int32(k["cantos"])], -1, (0, 255, 0), 3)
-        for xs, ys in solta:
+        for xs, ys in self._solta:
             a, b = m.robo_para_pixel(xs, ys, m.z_do_plano(ALTURA_COLETORA))
             cv2.drawMarker(vis, (int(a), int(b)), (255, 0, 255), cv2.MARKER_SQUARE, 50, 3)
         cv2.imwrite("fotos/pp_plano.jpg", vis)
+        return caixas
 
+    def pegar(self, k, i):
+        """um ciclo: vai até a caixa, confere pela câmera, pega, solta no ponto i da coletora e sobe"""
+        r, m = self.r, self.m
+        u_, v_ = k["centro"]
+        x, y = m.pixel_para_robo(u_, v_, m.z_do_plano(ALTURA_CAIXA))
+        pos = r.posicoes()
+        try:
+            cmd = m.ik(x, y, ref=(pos["j1"], pos["j2"]), livre=self.livre)
+            cmd_solta = m.ik(*self._solta[i % len(self._solta)], ref=cmd)
+        except ValueError as ex:
+            raise CaixaInalcancavel("px (%.0f, %.0f): %s" % (u_, v_, ex)) from ex
+        print("caixa %d %s: px (%.0f, %.0f) -> (%.1f, %.1f) mm, juntas (%.1f, %.1f)" % (i + 1, k.get("nome", ""), u_, v_, x, y, *cmd))
+        t = time.time()
+        r.ir_juntas(*cmd)                 # no alto, por cima de tudo
+        r.ir("z", Z_MIRA)
+        cmd = self.mira(x, y, cmd)
+        self.bomba.rele(RELE_PEGA)        # desceu para pegar: relé troca, ventosa puxa
+        r.ir("z", Z_PEGA)
+        time.sleep(PAUSA_VENTOSA)
+        r.ir("z", Z_ALTO)
+        r.ir_juntas(*cmd_solta)
+        r.ir("z", Z_SOLTA)
+        self.bomba.rele(RELE_REPOUSO)     # em cima da coletora: relé liga de novo, a caixa cai
+        time.sleep(PAUSA_VENTOSA)
+        r.ir("z", Z_ALTO)
+        self.checar_eventos()
+        print("   ciclo %.1f s" % (time.time() - t))
+
+    def estacionar(self):
+        if self.r.posicao("z") < Z_ALTO:
+            self.r.ir("z", Z_ALTO)
+        self.r.ir_juntas(*PARQUE)
+
+    def parar(self):
+        self.r.parar()
+
+    def rodar(self, nome=None, alvo_px=None, ordem=None):
+        self.com_nomes = bool(nome or ordem) and not alvo_px
+        caixas = self.preparar()
+        if alvo_px:                           # caixa indicada à mão (ex.: cortada na borda da imagem)
+            caixas = [{"centro": alvo_px, "nome": nome or "", "cantos": []}]
+        elif ordem:                           # todas as caixas dos remédios da lista, na ordem da lista
+            pos_lista = lambda k: next((i for i, n in enumerate(ordem) if mesmo_nome(n, k["nome"])), None)
+            caixas = sorted([k for k in caixas if pos_lista(k) is not None], key=pos_lista)
+            if not caixas:
+                print("nenhuma caixa da lista encontrada: o braço não se move")
+                return
+        elif nome:
+            caixas = [k for k in caixas if mesmo_nome(nome, k["nome"])]
+            if not caixas:
+                print("nenhuma caixa de %s encontrada: o braço não se move" % nome)
+                return
         t0 = time.time()
         feitas = 0
         for k in (caixas if ordem else sorted(caixas, key=lambda k: k["centro"][1])):
-            u_, v_ = k["centro"]
-            x, y = m.pixel_para_robo(u_, v_, m.z_do_plano(ALTURA_CAIXA))
-            pos = r.posicoes()
             try:
-                cmd = m.ik(x, y, ref=(pos["j1"], pos["j2"]), livre=self.livre)
-                cmd_solta = m.ik(*solta[feitas], ref=cmd)
-            except ValueError as ex:
-                print("caixa px (%.0f, %.0f): pulada (%s)" % (u_, v_, ex))
+                self.pegar(k, feitas)
+            except CaixaInalcancavel as ex:
+                print("caixa pulada (%s)" % ex)
                 continue
-            print("caixa %d %s: px (%.0f, %.0f) -> (%.1f, %.1f) mm, juntas (%.1f, %.1f)" % (feitas + 1, k.get("nome", ""), u_, v_, x, y, *cmd))
-            t = time.time()
-            r.ir_juntas(*cmd)                 # no alto, por cima de tudo
-            r.ir("z", Z_MIRA)
-            cmd = self.mira(x, y, cmd)
-            self.bomba.rele(RELE_PEGA)        # desceu para pegar: relé troca, ventosa puxa
-            r.ir("z", Z_PEGA)
-            time.sleep(PAUSA_VENTOSA)
-            r.ir("z", Z_ALTO)
-            r.ir_juntas(*cmd_solta)
-            r.ir("z", Z_SOLTA)
-            self.bomba.rele(RELE_REPOUSO)     # em cima da coletora: relé liga de novo, a caixa cai
-            time.sleep(PAUSA_VENTOSA)
-            r.ir("z", Z_ALTO)
             feitas += 1
-            self.checar_eventos()
-            print("   ciclo %.1f s" % (time.time() - t))
-        r.ir_juntas(*PARQUE)
+        self.r.ir_juntas(*PARQUE)
         print("%d caixas, total %.1f s" % (feitas, time.time() - t0))
 
 
