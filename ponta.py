@@ -22,7 +22,8 @@ def hexagonos(f):
         out.append({"c": (M["m10"] / M["m00"], M["m01"] / M["m00"]), "area": a, "r": r, "circ": circ, "hull": h})
     return out, m
 
-def acha_ponta(f, centro=CENTRO_J1):
+def acha_ponta(f, centro=CENTRO_J1, perto=None):
+    """hexágono da ponta; com `perto` (pixel previsto), o candidato mais próximo dele, senão o de centro mais claro"""
     hs, _ = hexagonos(f)
     # ponta: hexágono com o rolamento e o engate branco (centro claro); o cotovelo tem o motor (centro escuro)
     g = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
@@ -38,6 +39,8 @@ def acha_ponta(f, centro=CENTRO_J1):
             cand.append(h)
     if not cand:
         return None
+    if perto is not None:
+        return min(cand, key=lambda h: np.hypot(h["c"][0] - perto[0], h["c"][1] - perto[1]))
     return max(cand, key=lambda h: h["brilho"])
 
 if __name__ == "__main__":
@@ -69,7 +72,7 @@ def ponta_precisa(f, esperado=None):
     """centro do anel do rolamento (Hough) dentro do hexágono da ponta; cai no centro do hexágono se não achar.
     Com `esperado` (pixel previsto pelo modelo): se o hexágono não aparecer ali (ex.: azul da caixa embaixo),
     procura o anel do rolamento em volta do ponto previsto."""
-    p = acha_ponta(f)
+    p = acha_ponta(f, perto=esperado)
     if esperado is not None and (p is None or np.hypot(p["c"][0] - esperado[0], p["c"][1] - esperado[1]) > 60):
         return _anel(f, int(esperado[0]), int(esperado[1]), 60)
     if p is None:

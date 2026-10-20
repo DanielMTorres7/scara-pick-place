@@ -14,6 +14,7 @@ L1, L2 = 300.0, 200.0
 VEL = {"j1": 15.0, "j2": 20.0}    # °/s e °/s²: devagar, o braço passa por toda a mesa
 ACEL = {"j1": 30.0, "j2": 30.0}
 DIST_MAX_PX = 200                 # achado longe disso da previsão = outra coisa azul na imagem
+DIST_MAX_MODELO_PX = 40           # idem, prevendo pelo modelo calibrado (erro ~5 px)
 
 
 def sequencia(poses, zs):
@@ -43,7 +44,8 @@ def faixa(s):
     return [a + i * p for i in range(n + 1)]
 
 
-def coletar(seq, prev, saida, fator=1.0):
+def coletar(seq, prev, saida, fator=1.0, dist_max=DIST_MAX_PX):
+    """prev(j1, j2, z) -> pixel previsto da ponta"""
     from cam import Cam
     from ponta import ponta_precisa
     from scara import Scara
@@ -55,9 +57,10 @@ def coletar(seq, prev, saida, fator=1.0):
                 r.ir("z", max(zz for _, _, zz in seq))          # troca de pose sempre no Z mais alto
                 r.ir_juntas(j1, j2, vmax=vel, amax=acel)
             r.ir("z", z); time.sleep(0.3)
-            p = ponta_precisa(c.foto())
-            if p and math.dist(p, prev[(j1, j2)]) > DIST_MAX_PX:
-                print("descartado", p, "previsto", prev[(j1, j2)])
+            esp = prev(j1, j2, z)
+            p = ponta_precisa(c.foto(), esperado=esp)
+            if p and math.dist(p, esp) > dist_max:
+                print("descartado", p, "previsto", esp)
                 p = None
             dados.append({"j1": j1, "j2": j2, "z": z, "px": [round(p[0], 1), round(p[1], 1)] if p else None})
             print("%d/%d" % (i + 1, len(seq)), dados[-1])
@@ -79,19 +82,27 @@ if __name__ == "__main__":
     ap.add_argument("--z", default="-40,10")
     ap.add_argument("--saida", default="dados_grade.json")
     ap.add_argument("--fator", type=float, default=1.0, help="multiplica velocidade e aceleração")
+    ap.add_argument("--modelo", action="store_true",
+                    help="prevê pela calibracao_braco.json (precisa) em vez de --centro/--escala/--ang0/--o2")
     ap.add_argument("--simular", action="store_true", help="só lista as poses")
     a = ap.parse_args()
-    centro = tuple(float(v) for v in a.centro.split(","))
-    prev, poses = {}, []
+    zs = [float(v) for v in a.z.split(",")]
+    if a.modelo:
+        from modelo import Modelo
+        m = Modelo()
+        prev, dist_max = (lambda j1, j2, z: m.robo_para_pixel(*m.fk(j1, j2), z)), DIST_MAX_MODELO_PX
+    else:
+        centro = tuple(float(v) for v in a.centro.split(","))
+        prev, dist_max = (lambda j1, j2, z: previsto(j1, j2, centro, a.escala, a.ang0, a.o2)), DIST_MAX_PX
+    poses = []
     for k, j1 in enumerate(faixa(a.j1)):
         j2s = faixa(a.j2)
         for j2 in (j2s if k % 2 == 0 else j2s[::-1]):             # serpente: J2 vai e volta
-            p = previsto(j1, j2, centro, a.escala, a.ang0, a.o2)
-            if na_imagem(p):
-                prev[(j1, j2)] = p; poses.append((j1, j2))
-    seq = sequencia(poses, [float(v) for v in a.z.split(",")])
+            if all(na_imagem(prev(j1, j2, z)) for z in zs):
+                poses.append((j1, j2))
+    seq = sequencia(poses, zs)
     print("%d poses, %d pontos" % (len(poses), len(seq)))
     if a.simular:
-        for j in poses: print(j, [round(v) for v in prev[j]])
+        for j in poses: print(j, [[round(v) for v in prev(*j, z)] for z in zs])
     else:
-        coletar(seq, prev, a.saida, a.fator)
+        coletar(seq, prev, a.saida, a.fator, dist_max)

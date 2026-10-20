@@ -17,3 +17,12 @@ def test_ponta_com_centro_meio_escuro_ainda_e_ponta_e_cotovelo_escuro_nao():
     p = ponta.acha_ponta(img)
     assert p is not None
     assert np.hypot(p["c"][0] - 1650, p["c"][1] - 230) < 3
+
+
+def test_perto_escolhe_o_candidato_mais_proximo_da_previsao():
+    img = np.full((1080, 1920, 3), 230, np.uint8)
+    _hexagono(img, (1456, 751), 63, 200)      # alicate de cabo azul: centro bem claro
+    _hexagono(img, (500, 700), 61, 95)        # ponta de verdade
+    assert np.hypot(*np.subtract(ponta.acha_ponta(img)["c"], (1456, 751))) < 3
+    p = ponta.acha_ponta(img, perto=(510, 690))
+    assert np.hypot(p["c"][0] - 500, p["c"][1] - 700) < 3

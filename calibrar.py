@@ -51,7 +51,8 @@ def ajustar(dados):
             "L1": L1, "L2": L2}, err, d
 
 if __name__ == "__main__":
-    cal, err, d = ajustar(json.load(open("dados_grade.json")))
+    import sys
+    cal, err, d = ajustar(json.load(open(sys.argv[1] if len(sys.argv) > 1 else "dados_grade.json")))
     for x, e in zip(d, err):
         print(x["j1"], x["j2"], x["z"], x["px"], "erro %.1f px" % e)
     print("erro mediano %.2f px, max %.1f px" % (np.median(err), err.max()))
