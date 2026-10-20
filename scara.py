@@ -31,6 +31,7 @@ VEL_JUNTAS = {"j1": 900 / 60 * 360 / 14, "j2": 900 / 60 * 360 / 12}   # 900 rpm 
 VEL_PONTA = 3000.0  # mm/s: teto da velocidade da ponta (cartesiana)
 L1, L2, O2 = 300.0, 200.0, -22.53   # braço (mm) e zero do J2 (calibracao_braco.json)
 ACEL_JUNTAS = {"j1": 60.0, "j2": 60.0}   # °/s²: reduzida depois da bomba montada no antebraço (antes 120 testado sem bomba)
+SUAVE = 0.0        # curva S: fração da rampa com aceleração variando (0 = trapézio, 1 = S completa)
 DT = 0.01          # s por segmento (igual ao painel)
 FREQ = 10_000_000  # relógio do gerador de passos da placa
 TJ_DMIN = 50
@@ -40,9 +41,11 @@ class MovimentoAbortado(RuntimeError):
     """a placa parou o eixo antes do alvo (24 V, fim de curso, emergência...)"""
 
 
-def perfil_sincrono(deltas, vmax, amax):
-    """trapézio com a mesma forma no tempo para todas as juntas (começam e terminam juntas).
-    Devolve (T, f): duração total e fração de aceleração (ta = f*T)."""
+def perfil_sincrono(deltas, vmax, amax, suave=0.0):
+    """perfil com a mesma forma no tempo para todas as juntas (começam e terminam juntas).
+    Devolve (T, f): duração total e fração de aceleração (ta = f*T). Com curva S (`suave`) a aceleração
+    de pico é maior que a média da rampa, então a rampa se alonga para o pico não passar de amax."""
+    k_s = 1 - suave / 2
     melhor = None
     for i in range(1, 51):
         f = i / 100.0
@@ -51,7 +54,7 @@ def perfil_sincrono(deltas, vmax, amax):
             d = abs(d)
             if d == 0:
                 continue
-            T = max(T, math.sqrt(d / (amax[k] * f * (1 - f))), d / (vmax[k] * (1 - f)))
+            T = max(T, math.sqrt(d / (amax[k] * f * (1 - f) * k_s)), d / (vmax[k] * (1 - f)))
         if melhor is None or T < melhor[0]:
             melhor = (T, f)
     return melhor
@@ -72,6 +75,32 @@ def s_trapezio(t, T, f):
         return 0.5 * a * ta * ta + v * (t - ta)
     u = T - t
     return 1.0 - 0.5 * a * u * u
+
+
+def s_curva(t, T, f, suave=0.0):
+    """posição normalizada (0..1) com rampa de duração f*T em que a aceleração sobe e desce linearmente
+    durante `suave`/2 da rampa em cada ponta (tranco limitado); suave = 0 é o trapézio"""
+    if suave <= 0:
+        return s_trapezio(t, T, f)
+    if t <= 0:
+        return 0.0
+    if t >= T:
+        return 1.0
+    if t > T / 2:
+        return 1.0 - s_curva(T - t, T, f, suave)
+    ta = f * T
+    tj = suave * ta / 2
+    v = 1.0 / (T - ta)              # rampa simétrica: anda v*ta/2, como no trapézio
+    a = v / (ta - tj)               # aceleração de pico
+    if t >= ta:
+        return v * ta / 2 + v * (t - ta)
+    if t <= tj:
+        return a * t ** 3 / (6 * tj)
+    if t <= ta - tj:
+        u = t - tj
+        return a * tj * tj / 6 + a * tj / 2 * u + a * u * u / 2
+    u = ta - t
+    return v * ta / 2 - v * u + a * u ** 3 / (6 * tj)
 
 
 def codifica(q, spu, p0, freq=FREQ, dmin=TJ_DMIN):
@@ -203,7 +232,7 @@ class Scara:
                 raise MovimentoAbortado("%s parou em %.2f, alvo %.2f: %s" % (
                     eixo, p / e["passos_un"], alvo, "; ".join(pl.eventos[n0:]) or "sem evento"))
 
-    def ir_juntas(self, j1, j2, vmax=None, amax=None):
+    def ir_juntas(self, j1, j2, vmax=None, amax=None, suave=SUAVE):
         """J1 e J2 juntos (trajetória sincronizada na placa do braço), perfil trapezoidal"""
         alvo = {"j1": j1, "j2": j2}
         for k, v in alvo.items():
@@ -216,11 +245,11 @@ class Scara:
         deltas = {k: alvo[k] - ini[k] for k in alvo}
         if all(abs(d) < 1e-3 for d in deltas.values()):
             return 0.0
-        T, f = perfil_sincrono(deltas, vmax or VEL_JUNTAS, amax or ACEL_JUNTAS)
+        T, f = perfil_sincrono(deltas, vmax or VEL_JUNTAS, amax or ACEL_JUNTAS, suave)
         # limita a velocidade da ponta: estica o tempo se passar de VEL_PONTA
         def ponta(t):
-            a = math.radians(ini["j1"] + deltas["j1"] * s_trapezio(t, T, f))
-            b = a + math.radians(ini["j2"] + deltas["j2"] * s_trapezio(t, T, f) + O2)
+            a = math.radians(ini["j1"] + deltas["j1"] * s_curva(t, T, f, suave))
+            b = a + math.radians(ini["j2"] + deltas["j2"] * s_curva(t, T, f, suave) + O2)
             return L1 * math.cos(a) + L2 * math.cos(b), L1 * math.sin(a) + L2 * math.sin(b)
         vp = max(math.dist(ponta(t), ponta(t + DT)) / DT for t in [i * DT for i in range(int(T / DT) + 1)])
         if vp > VEL_PONTA:
@@ -228,7 +257,7 @@ class Scara:
         N = max(1, math.ceil(T / DT))
         ws = []
         for k in ("j1", "j2"):
-            q = [ini[k] + deltas[k] * s_trapezio((m + 1) * DT, T, f) for m in range(N)]
+            q = [ini[k] + deltas[k] * s_curva((m + 1) * DT, T, f, suave) for m in range(N)]
             q[-1] = alvo[k]
             w, _ = codifica(q, EIXOS[k]["passos_un"], pk[EIXOS[k]["k"]])
             ws.append(w)

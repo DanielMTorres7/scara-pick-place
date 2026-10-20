@@ -93,8 +93,8 @@ def ponta_mediana(fs, esperado=None):
 
 
 class Demo:
-    def __init__(self, acel_fator=1.0):
-        self.acel_fator = acel_fator
+    def __init__(self, acel_fator=1.0, suave=0.0):
+        self.acel_fator, self.suave = acel_fator, suave
         self.r = Scara(); self.c = Cam()
         for p in ("braco", "z"):
             self.r.energizar(p)
@@ -121,17 +121,17 @@ class Demo:
         self.fotos_na_ref(n=0)
         return (np.subtract(p, self.ref_px)) / PASSO_GANHO
 
-    def junta(self, eixo, rpm, n=VAI_VOLTA):
+    def junta(self, eixo, rpm, n=VAI_VOLTA, acel_abs=None):
         a, b = CURSO[eixo]
         v = vel(eixo, rpm)
-        a_ = acel(v, b - a) * self.acel_fator
+        a_ = acel_abs if acel_abs is not None else acel(v, b - a) * self.acel_fator
         vmax = {"j1": v, "j2": v}; amax = {"j1": a_, "j2": a_}
         fixo = {"j1": REF[0], "j2": REF[1]}
         self.r.ir_juntas(**{**fixo, eixo: a}, vmax=LENTO[0], amax=LENTO[1])
         t0 = time.time()
         for _ in range(n):
-            T1 = self.r.ir_juntas(**{**fixo, eixo: b}, vmax=vmax, amax=amax)
-            T2 = self.r.ir_juntas(**{**fixo, eixo: a}, vmax=vmax, amax=amax)
+            T1 = self.r.ir_juntas(**{**fixo, eixo: b}, vmax=vmax, amax=amax, suave=self.suave)
+            T2 = self.r.ir_juntas(**{**fixo, eixo: a}, vmax=vmax, amax=amax, suave=self.suave)
         print("  %s: %d vai-e-volta de %.0f° em %.1f s (%.2f s por trecho, %.0f °/s, %.0f °/s²)"
               % (eixo, n, b - a, time.time() - t0, (T1 + T2) / 2, v, a_))
 
@@ -169,14 +169,16 @@ class Demo:
         self.r.definir("z", Z_CHAVE)
         return zc - Z_CHAVE
 
-    def teste(self, eixos=("j1", "j2", "z"), degraus=DEGRAUS):
+    def teste(self, eixos=("j1", "j2", "z"), degraus=DEGRAUS, acels=None):
+        """sobe a rpm em `degraus`; com `acels`, fica na rpm de degraus[0] e sobe a aceleração (°/s²)"""
+        etapas = [(rpm, None) for rpm in degraus] if not acels else [(degraus[0], a) for a in acels]
         seguro = {}
         for eixo in eixos:
             if eixo == "z":
                 print("Z referenciado no fim de curso: %+.2f mm do que a placa achava" % self.erro_z())
             base = None
-            for rpm in degraus:
-                print("%s a %d rpm" % (eixo, rpm))
+            for rpm, a_ in etapas:
+                print("%s a %d rpm%s" % (eixo, rpm, "" if a_ is None else ", %.0f °/s²" % a_))
                 if eixo == "z":
                     try:
                         self.z(rpm); bateu = ""
@@ -185,7 +187,7 @@ class Demo:
                     e = self.erro_z(); ok = abs(e) <= LIMITE_Z_MM and not bateu
                     print("  Z: fim de curso a %+.2f mm do esperado%s" % (e, bateu))
                 else:
-                    self.junta(eixo, rpm); e, d, cam = self.erro_juntas()
+                    self.junta(eixo, rpm, acel_abs=a_); e, d, cam = self.erro_juntas()
                     base = d if base is None else base
                     alem = {k: d[k] - base[k] for k in d}      # a outra junta também conta: a reação pode arrastá-la
                     ok = all(abs(v) <= LIMITE_GRAUS for v in alem.values())
@@ -193,11 +195,11 @@ class Demo:
                         e, ", ".join("%s %+.2f°" % kv for kv in alem.items()),
                         "  (câmera andou %.0f px, descontado)" % cam if cam > 3 else ""))
                 if not ok:
-                    print("  PERDEU PASSO: %s fica em %s rpm" % (eixo, seguro.get(eixo, "<%d" % degraus[0])))
+                    print("  PERDEU PASSO: %s fica em %s" % (eixo, seguro.get(eixo, "abaixo do 1º degrau")))
                     if eixo != "z":              # a placa passa a saber onde as juntas estão de verdade
                         self.corrige(alem)
                     break
-                seguro[eixo] = rpm
+                seguro[eixo] = rpm if a_ is None else "%d rpm a %.0f °/s²" % (rpm, a_)
         return seguro
 
     def show(self, rpm, voltas):
@@ -207,7 +209,7 @@ class Demo:
         print("show: %s, Z %.0f mm/s" % (", ".join("%s %.0f °/s %.0f °/s²" % (k, vj[k], aj[k]) for k in RED), f * EIXOS["z"]["v"]))
         for _ in range(voltas):
             for j1, j2 in SHOW:
-                self.r.ir_juntas(j1, j2, vmax=vj, amax=aj)
+                self.r.ir_juntas(j1, j2, vmax=vj, amax=aj, suave=self.suave)
                 self.r.ir("z", CURSO["z"][0], fator=f); self.r.ir("z", REF[2], fator=f)
         e, d, cam = self.erro_juntas()
         print("ponta a %.1f px da referência: %s (câmera andou %.0f px, descontado)" % (
@@ -233,11 +235,14 @@ if __name__ == "__main__":
     ap.add_argument("--eixos", default="j1,j2,z", help="teste: eixos testados")
     ap.add_argument("--degraus", default=",".join(map(str, DEGRAUS)), help="teste: rpm de cada degrau")
     ap.add_argument("--acel-fator", type=float, default=1.0, help="multiplica a aceleração das juntas")
+    ap.add_argument("--acels", default="", help="teste: acelerações (°/s²) na rpm de --degraus[0]")
+    ap.add_argument("--suave", type=float, default=0.0, help="curva S: 0 = trapézio, 1 = S completa")
     a = ap.parse_args()
-    d = Demo(a.acel_fator)
+    d = Demo(a.acel_fator, a.suave)
     try:
         if a.modo == "teste":
-            print("rpm seguras:", d.teste(a.eixos.split(","), [float(v) for v in a.degraus.split(",")]))
+            print("seguro:", d.teste(a.eixos.split(","), [float(v) for v in a.degraus.split(",")],
+                                     [float(v) for v in a.acels.split(",")] if a.acels else None))
         else:
             d.show(a.rpm, a.voltas)
     except BaseException:
