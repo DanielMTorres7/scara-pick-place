@@ -126,16 +126,17 @@ O sistema EMR (repositório `Software-Challenge-3EMR`) lança a OS e o braço a 
 contagem real de caixas soltas na coletora.
 
 ```bash
-ROBO_TOKEN=<mesmo valor de EMR_ROBO_TOKEN> uv run python servidor_os.py --porta 8770
+ROBO_TOKEN=<mesmo valor de EMR_ROBO_TOKEN> EMR_URL=http://<emr>:8765 uv run python servidor_os.py --porta 8770
 ```
 
 No `.env` do EMR: `EMR_ROBO_TOKEN`, `EMR_ROBO_CODE` (código do separador que é o braço),
-`EMR_OS_JSON_URL=http://<este notebook>:8770/os` e `EMR_PUBLIC_BASE_URL` (endereço do EMR visto daqui).
+e `EMR_OS_JSON_URL=http://<este notebook>:8770/os`. O endereço do EMR fica só no `EMR_URL` do braço: o token
+nunca é enviado para um endereço que venha no pedido.
 
-1. O EMR faz `POST /os` com `{"os", "cliente", "quantidade", "separadas", "itens": [{"nome", "quantidade", ...}], "callback"}`.
+1. O EMR faz `POST /os` com `{"os", "cliente", "quantidade", "separadas", "itens": [{"nome", "quantidade", ...}]}`.
    O braço responde 202 e trabalha em segundo plano (uma OS por vez; a mesma OS de novo = retomada).
 2. Foto da mesa, nomes pelo Gemini, fila na ordem e na quantidade pedidas (`selecao.py`).
-3. A cada caixa solta: `POST {callback}/evento {"tipo": "unit", "separadas": N}`. A resposta traz o estado da OS:
+3. A cada caixa solta: `POST {EMR_URL}/api/robo/<os>/evento {"tipo": "unit", "separadas": N}`. A resposta traz o estado da OS:
    pausada = o braço termina a caixa, estaciona e espera; cancelada/concluída = encerra.
 4. Faltou caixa na mesa: evento `faltando` e o EMR pausa com "Remédios faltando: …". Reponha e retome: nova foto,
    só o que falta.

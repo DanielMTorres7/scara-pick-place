@@ -1,11 +1,12 @@
 """Servidor HTTP do braço: o sistema EMR manda a OS (POST /os) e o braço a executa em segundo plano (job_os),
-avisando o sistema a cada caixa pelo `callback` da própria OS. Uma OS por vez.
+avisando o sistema a cada caixa em EMR_URL/api/robo/<os>. Uma OS por vez. O endereço do sistema vem da
+configuração do braço, nunca do pedido: o token não vai para uma URL escolhida por quem manda a OS.
 
   POST /os     Authorization: Bearer <ROBO_TOKEN>    -> 202 aceita | 400 inválida | 401 token | 409 ocupado
                (a mesma OS de novo com o job vivo = retomada: 202 sem novo job)
   GET  /saude  -> {"ocupado": bool, "os": str|null}
 
-Uso: ROBO_TOKEN=... python servidor_os.py [--porta 8770]
+Uso: ROBO_TOKEN=... EMR_URL=http://<emr>:8765 python servidor_os.py [--porta 8770]
 """
 import argparse
 import hmac
@@ -13,6 +14,7 @@ import json
 import os
 import sys
 import threading
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -32,9 +34,6 @@ def valida_pedido(corpo):
     os_ = corpo.get("os")
     if not isinstance(os_, str) or not os_.strip():
         raise ValueError("os: texto não vazio")
-    cb = corpo.get("callback")
-    if not isinstance(cb, str) or not cb.startswith(("http://", "https://")):
-        raise ValueError("callback: URL http(s)")
     itens = corpo.get("itens", [])
     if not isinstance(itens, list):
         raise ValueError("itens: lista")
@@ -43,9 +42,14 @@ def valida_pedido(corpo):
         if not isinstance(it, dict) or not isinstance(it.get("nome"), str) or not it["nome"].strip():
             raise ValueError("itens[].nome: texto não vazio")
         limpos.append({"nome": it["nome"].strip(), "quantidade": _int(it.get("quantidade"), 1, "itens[].quantidade")})
-    return {"os": os_.strip(), "cliente": str(corpo.get("cliente", "")), "callback": cb, "itens": limpos,
+    return {"os": os_.strip(), "cliente": str(corpo.get("cliente", "")), "itens": limpos,
             "quantidade": _int(corpo.get("quantidade", 0), 0, "quantidade"),
             "separadas": _int(corpo.get("separadas", 0), 0, "separadas")}
+
+
+def callback_de(emr_url, os_):
+    """endpoint do sistema para os eventos desta OS"""
+    return "%s/api/robo/%s" % (emr_url.rstrip("/"), urllib.parse.quote(os_, safe=""))
 
 
 def cria_servidor(porta, token, novo_job):
@@ -110,6 +114,9 @@ def main():
     token = os.environ.get("ROBO_TOKEN", "").strip()
     if not token:
         sys.exit("defina ROBO_TOKEN (o mesmo valor de EMR_ROBO_TOKEN no sistema)")
+    emr_url = os.environ.get("EMR_URL", "").strip()
+    if not emr_url.startswith(("http://", "https://")):
+        sys.exit("defina EMR_URL (endereço do sistema EMR, ex.: http://127.0.0.1:8765)")
 
     from job_os import JobOS
     from pick_place import PickPlace
@@ -120,7 +127,7 @@ def main():
 
     def novo_job(pedido):
         return JobOS(pedido, lambda: PickPlace(com_nomes=bool(pedido["itens"])),
-                     Sistema(pedido["callback"], token), progresso)
+                     Sistema(callback_de(emr_url, pedido["os"]), token), progresso)
 
     srv = cria_servidor(args.porta, token, novo_job)
     print("braço esperando OS em http://0.0.0.0:%d/os" % args.porta)

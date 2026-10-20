@@ -5,7 +5,7 @@ import urllib.request
 
 import pytest
 
-from servidor_os import cria_servidor, valida_pedido
+from servidor_os import callback_de, cria_servidor, valida_pedido
 
 PEDIDO = {"os": "OS-1", "cliente": "Fulano", "quantidade": 3, "separadas": 0,
           "itens": [{"remedio_id": "1", "remedio": "MICPURE 10MG", "nome": "micpure", "quantidade": 2},
@@ -113,7 +113,7 @@ def test_saude(srv):
 
 
 @pytest.mark.parametrize("ruim", [
-    {"os": ""}, {"callback": "ftp://x"}, {"quantidade": -1}, {"separadas": "2"},
+    {"os": ""}, {"quantidade": -1}, {"separadas": "2"},
     {"itens": "micpure"}, {"itens": [{"nome": 3, "quantidade": 1}]}, {"itens": [{"nome": "x", "quantidade": True}]},
 ])
 def test_valida_pedido_recusa(ruim):
@@ -124,3 +124,8 @@ def test_valida_pedido_recusa(ruim):
 def test_valida_pedido_recusa_nao_dict():
     with pytest.raises(ValueError):
         valida_pedido([1])
+
+
+def test_callback_vem_da_config_e_ignora_o_pedido():
+    assert "callback" not in valida_pedido({**PEDIDO, "callback": "http://atacante/x"})
+    assert callback_de("http://emr:8765/", "OS 1/2") == "http://emr:8765/api/robo/OS%201%2F2"
