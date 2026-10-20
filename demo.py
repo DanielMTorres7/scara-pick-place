@@ -131,7 +131,14 @@ class Demo:
     def erro_juntas(self, eixo):
         """(px, graus perdidos, px que a câmera andou), já descontando o movimento da câmera"""
         fs = self.fotos_na_ref()
-        M = mov_camera(self.ref_f, fs[0])
+        M = None
+        for f in fs:                         # alguém passando na frente do tabuleiro numa foto não derruba o teste
+            try:
+                M = mov_camera(self.ref_f, f); break
+            except RuntimeError:
+                continue
+        if M is None:
+            raise RuntimeError("tabuleiro não encontrado em nenhuma das %d fotos" % len(fs))
         esp = aplica(M, self.ref_px)
         p = ponta_mediana(fs, esperado=esp)
         if p is None:                        # perdeu muito: o hexágono mais próximo do previsto, como estimativa
