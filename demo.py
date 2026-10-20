@@ -12,7 +12,7 @@ import numpy as np
 
 from cam import Cam
 from ponta import acha_ponta, ponta_precisa
-from scara import EIXOS, Scara, Z_CHAVE
+from scara import EIXOS, MovimentoAbortado, Scara, Z_CHAVE
 
 RED = {"j1": 14, "j2": 12}       # redução das juntas
 PASSO_Z = 8.0                    # mm por volta do fuso
@@ -20,7 +20,7 @@ DEGRAUS = (300, 600, 900)        # rpm no motor
 CURSO = {"j1": (-60.0, 60.0), "j2": (-60.0, 100.0), "z": (-90.0, 40.0)}   # longe dos extremos (cabos)
 REF = (0.0, 80.0, -40.0)         # pose em que a câmera confere a ponta
 LENTO = ({"j1": 30.0, "j2": 40.0}, {"j1": 60.0, "j2": 60.0})
-LIMITE_PX = 8.0                  # ~4 mm: acima disso a junta perdeu passo
+LIMITE_GRAUS = 0.5               # perda além da do 1º degrau (base: folga + ruído da câmera ~0,3°)
 PASSO_GANHO = 3.0                # ° de junta para medir quantos px a ponta anda por grau
 LIMITE_Z_MM = 1.0
 VAI_VOLTA = 5                    # ciclos por degrau: uma perda pequena por ciclo cresce acima do ruído (~3 px)
@@ -160,20 +160,27 @@ class Demo:
         for eixo in eixos:
             if eixo == "z":
                 print("Z referenciado no fim de curso: %+.2f mm do que a placa achava" % self.erro_z())
+            base = None
             for rpm in degraus:
                 print("%s a %d rpm" % (eixo, rpm))
                 if eixo == "z":
-                    self.z(rpm); e = self.erro_z(); ok = abs(e) <= LIMITE_Z_MM
-                    print("  Z: fim de curso a %+.2f mm do esperado" % e)
+                    try:
+                        self.z(rpm); bateu = ""
+                    except MovimentoAbortado as ex:      # perdeu tanto que chegou num fim de curso
+                        bateu = "  (%s)" % ex
+                    e = self.erro_z(); ok = abs(e) <= LIMITE_Z_MM and not bateu
+                    print("  Z: fim de curso a %+.2f mm do esperado%s" % (e, bateu))
                 else:
-                    self.junta(eixo, rpm); e, graus, cam = self.erro_juntas(eixo); ok = e <= LIMITE_PX
-                    print("  ponta a %.1f px da referência: %s perdeu ~%+.2f°%s" % (
-                        e, eixo, graus, "  (câmera andou %.0f px, descontado)" % cam if cam > 3 else ""))
+                    self.junta(eixo, rpm); e, graus, cam = self.erro_juntas(eixo)
+                    base = graus if base is None else base
+                    ok = abs(graus - base) <= LIMITE_GRAUS
+                    print("  ponta a %.1f px da referência: %s em %+.2f° (%+.2f° além da base)%s" % (
+                        e, eixo, graus, graus - base, "  (câmera andou %.0f px, descontado)" % cam if cam > 3 else ""))
                 if not ok:
                     print("  PERDEU PASSO: %s fica em %s rpm" % (eixo, seguro.get(eixo, "<%d" % degraus[0])))
                     if eixo != "z":              # a placa passa a saber onde a junta está de verdade
-                        self.r.definir(eixo, self.r.posicao(eixo) + graus)
-                        print("  %s corrigida em %+.2f°" % (eixo, graus))
+                        self.r.definir(eixo, self.r.posicao(eixo) + graus - base)
+                        print("  %s corrigida em %+.2f°" % (eixo, graus - base))
                     break
                 seguro[eixo] = rpm
         return seguro
