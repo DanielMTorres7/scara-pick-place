@@ -82,7 +82,7 @@ def test_pega_tudo_e_conclui(tmp_path):
 
 def test_faltando_pausa_e_retoma(tmp_path):
     ex = ExecutorFalso([[_cx("Micpure", 1), _cx("Micpure", 2)], [_cx("Arpadol", 5)]])
-    sis = SistemaFalso(eventos=["running", "running", "paused"], estados=["paused", "running"])
+    sis = SistemaFalso(eventos=["running", "running", "paused"], estados=["running", "paused", "running"])
     _job(tmp_path, ex, sis).rodar()
     assert sis.eventos[2] == ("faltando", 2, {"faltando": [{"nome": "arpadol", "faltam": 1}]})
     assert ("unit", 3) in _tipos(sis) and _tipos(sis)[-1] == ("concluida", 3)
@@ -91,7 +91,7 @@ def test_faltando_pausa_e_retoma(tmp_path):
 
 def test_pausa_no_meio_estaciona(tmp_path):
     ex = ExecutorFalso([[_cx("Micpure", 1), _cx("Micpure", 2), _cx("Arpadol", 3)], [_cx("Micpure", 2), _cx("Arpadol", 3)]])
-    sis = SistemaFalso(eventos=["paused"], estados=["paused", "running"])
+    sis = SistemaFalso(eventos=["paused"], estados=["running", "paused", "running"])
     _job(tmp_path, ex, sis).rodar()
     i = ex.chamadas.index("estacionar")
     assert ex.chamadas[:i] == ["preparar", ("pegar", "Micpure")]
@@ -126,7 +126,8 @@ def test_caixa_inalcancavel_vira_faltando(tmp_path):
 
 def test_sistema_cai_e_volta(tmp_path):
     ex = ExecutorFalso([[_cx("Micpure", 1), _cx("Micpure", 2), _cx("Arpadol", 3)], [_cx("Micpure", 2), _cx("Arpadol", 3)]])
-    sis = SistemaFalso(eventos=[SistemaIndisponivel("fora")], estados=[SistemaIndisponivel("fora"), "running"])
+    sis = SistemaFalso(eventos=[SistemaIndisponivel("fora")],
+                       estados=["running", SistemaIndisponivel("fora"), "running"])
     _job(tmp_path, ex, sis).rodar()
     assert _tipos(sis)[:2] == [("unit", 1), ("unit", 1)]     # reenvia o total antes de pegar a próxima
     assert ex.chamadas.index("estacionar") < ex.chamadas.index("preparar", 1)
@@ -169,3 +170,49 @@ def test_falha_ao_abrir_hardware_manda_erro(tmp_path):
     pedido = {"os": "OS-1", "itens": ITENS, "quantidade": 3, "separadas": 0}
     JobOS(pedido, quebra, sis, Progresso(tmp_path / "p.json"), espera_pausa=0, dormir=lambda s: None).rodar()
     assert sis.eventos == [("erro", 0, {"mensagem": "placa braco não encontrada"})]
+
+
+def test_reenvio_falha_de_novo_nao_pega(tmp_path):
+    """I1: voltou a rodar, mas o reenvio do total falha: espera de novo, não pega caixa sem registro"""
+    ex = ExecutorFalso([[_cx("Micpure", 1), _cx("Micpure", 2), _cx("Arpadol", 3)], [_cx("Micpure", 2), _cx("Arpadol", 3)]])
+    sis = SistemaFalso(eventos=[SistemaIndisponivel("fora"), SistemaIndisponivel("fora")],
+                       estados=["running", "running"])
+    _job(tmp_path, ex, sis).rodar()
+    pegas = [i for i, c in enumerate(ex.chamadas) if c[0] == "pegar"]
+    assert sis.consultas >= 2 and ex.chamadas.count("preparar") == 2
+    assert _tipos(sis)[:3] == [("unit", 1), ("unit", 1), ("unit", 1)]
+    assert len(pegas) == 3
+
+
+def test_reenvio_devolve_paused_espera(tmp_path):
+    """I1: voltou a rodar, mas o reenvio diz que pausou de novo: não fotografa"""
+    ex = ExecutorFalso([[_cx("Micpure", 1), _cx("Micpure", 2), _cx("Arpadol", 3)]])
+    sis = SistemaFalso(eventos=["paused", "paused", "cancelled"], estados=["running", "running"])
+    _job(tmp_path, ex, sis).rodar()
+    assert ex.chamadas.count("preparar") == 1
+
+
+def test_cancelado_durante_a_foto_nao_pega(tmp_path):
+    """I2: OS cancelada enquanto o braço fotografava/lia nomes: nenhuma caixa"""
+    ex = ExecutorFalso([[_cx("Micpure", 1)]])
+    sis = SistemaFalso(estados=["cancelled"])
+    _job(tmp_path, ex, sis).rodar()
+    assert not [c for c in ex.chamadas if c[0] == "pegar"] and sis.eventos == []
+
+
+def test_inalcancavel_usa_outra_caixa_do_mesmo_remedio(tmp_path):
+    """I3: a 1ª micpure está fora do alcance, a 2ª não: conclui"""
+    ex = ExecutorFalso([[_cx("Micpure", 1), _cx("Micpure", 2)]], falhas={1.0: CaixaInalcancavel("longe")})
+    sis = SistemaFalso()
+    _job(tmp_path, ex, sis, itens=[{"nome": "micpure", "quantidade": 1}], quantidade=1).rodar()
+    assert _tipos(sis) == [("unit", 1), ("concluida", 1)]
+
+
+def test_encerrando_marcado_ao_cancelar(tmp_path):
+    """I6: o servidor precisa saber que o job está saindo"""
+    ex = ExecutorFalso([[_cx("Micpure", 1), _cx("Micpure", 2)]])
+    sis = SistemaFalso(eventos=["cancelled"])
+    job = _job(tmp_path, ex, sis)
+    assert job.encerrando is False
+    job.rodar()
+    assert job.encerrando is True

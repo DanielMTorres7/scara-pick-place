@@ -18,6 +18,7 @@ class JobFalso:
         self.pedido = pedido
         self.libera = threading.Event()
         self.rodou = threading.Event()
+        self.encerrando = False
 
     @property
     def os(self):
@@ -129,3 +130,44 @@ def test_valida_pedido_recusa_nao_dict():
 def test_callback_vem_da_config_e_ignora_o_pedido():
     assert "callback" not in valida_pedido({**PEDIDO, "callback": "http://atacante/x"})
     assert callback_de("http://emr:8765/", "OS 1/2") == "http://emr:8765/api/robo/OS%201%2F2"
+
+
+def test_valida_pedido_soma_mesmo_nome():
+    """I4: MICPURE 10MG e MICPURE 20MG viram um item só para o braço (a visão não distingue a dosagem)"""
+    p = valida_pedido({**PEDIDO, "quantidade": 3, "itens": [
+        {"nome": "micpure", "quantidade": 2}, {"nome": "arpadol", "quantidade": 1}, {"nome": "Micpure", "quantidade": 1}]})
+    assert p["itens"] == [{"nome": "micpure", "quantidade": 3}, {"nome": "arpadol", "quantidade": 1}]
+
+
+def test_job_encerrando_libera_para_nova_os(srv):
+    """I6: job saindo (cancelado) + OS nova: espera ele terminar em vez de 409"""
+    url, jobs = srv
+    _req(url + "/os", PEDIDO)
+    jobs[0].rodou.wait(2)
+    jobs[0].encerrando = True
+    threading.Timer(0.3, jobs[0].libera.set).start()
+    assert _req(url + "/os", {**PEDIDO, "os": "OS-2"})[0] == 202
+    assert len(jobs) == 2
+
+
+def test_mesma_os_com_job_encerrando_cria_job_novo(srv):
+    url, jobs = srv
+    _req(url + "/os", PEDIDO)
+    jobs[0].rodou.wait(2)
+    jobs[0].encerrando = True
+    threading.Timer(0.3, jobs[0].libera.set).start()
+    st, corpo = _req(url + "/os", PEDIDO)
+    assert st == 202 and corpo["retomada"] is False and len(jobs) == 2
+
+
+@pytest.mark.parametrize("n", ["abc", "-1"])
+def test_content_length_ruim_400(srv, n):
+    url, _ = srv
+    import http.client
+    host, port = url.replace("http://", "").split(":")
+    c = http.client.HTTPConnection(host, int(port), timeout=3)
+    c.putrequest("POST", "/os")
+    c.putheader("Authorization", "Bearer tok")
+    c.putheader("Content-Length", n)
+    c.endheaders()
+    assert c.getresponse().status == 400

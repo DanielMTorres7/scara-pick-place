@@ -8,6 +8,16 @@ import urllib.request
 TIMEOUT = 5.0
 
 
+OS_NAO_ENCONTRADA = "OS não encontrada."   # detail do 404 do /api/robo (outro 404 = rota/EMR_URL errado)
+
+
+def _detalhe(ex):
+    try:
+        return json.loads(ex.read()).get("detail")
+    except (ValueError, AttributeError, OSError):
+        return None
+
+
 class SistemaIndisponivel(RuntimeError):
     """o EMR não respondeu (rede, 5xx) ou recusou o token"""
 
@@ -36,7 +46,9 @@ class Sistema:
                     return json.loads(r.read())["estado"]
             except urllib.error.HTTPError as ex:
                 if ex.code == 404:
-                    return "cancelled"      # a OS não existe mais no sistema: encerra
+                    if _detalhe(ex) == OS_NAO_ENCONTRADA:
+                        return "cancelled"      # a OS não existe mais no sistema: encerra
+                    raise SistemaIndisponivel("rota não encontrada (404): confira EMR_URL") from ex
                 if ex.code in (401, 403, 503):
                     raise SistemaIndisponivel("EMR recusou (%d): confira EMR_ROBO_TOKEN" % ex.code) from ex
                 ultimo = ex

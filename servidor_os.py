@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 MAX_CORPO = 64 * 1024
+ESPERA_ENCERRAR = 20.0   # s que um job já encerrando (estacionando) tem para liberar o braço a uma OS nova
 
 
 def _int(v, minimo, campo):
@@ -37,11 +38,14 @@ def valida_pedido(corpo):
     itens = corpo.get("itens", [])
     if not isinstance(itens, list):
         raise ValueError("itens: lista")
-    limpos = []
+    limpos = {}     # a visão só lê o nome: dosagens diferentes do mesmo remédio viram um item só
     for it in itens:
         if not isinstance(it, dict) or not isinstance(it.get("nome"), str) or not it["nome"].strip():
             raise ValueError("itens[].nome: texto não vazio")
-        limpos.append({"nome": it["nome"].strip(), "quantidade": _int(it.get("quantidade"), 1, "itens[].quantidade")})
+        nome = it["nome"].strip().lower()
+        q = _int(it.get("quantidade"), 1, "itens[].quantidade")
+        limpos[nome] = limpos.get(nome, 0) + q
+    limpos = [{"nome": n, "quantidade": q} for n, q in limpos.items()]
     return {"os": os_.strip(), "cliente": str(corpo.get("cliente", "")), "itens": limpos,
             "quantidade": _int(corpo.get("quantidade", 0), 0, "quantidade"),
             "separadas": _int(corpo.get("separadas", 0), 0, "separadas")}
@@ -58,6 +62,8 @@ def cria_servidor(porta, token, novo_job):
 
     def ocupado():
         t = estado["thread"]
+        if t is not None and t.is_alive() and getattr(estado["job"], "encerrando", False):
+            t.join(ESPERA_ENCERRAR)      # cancelada/concluída/erro: só falta estacionar e soltar o hardware
         return t is not None and t.is_alive()
 
     class Handler(BaseHTTPRequestHandler):
@@ -82,7 +88,12 @@ def cria_servidor(porta, token, novo_job):
             auth = self.headers.get("Authorization", "")
             if not hmac.compare_digest(auth.encode(), ("Bearer " + token).encode()):
                 return self._responde(401, {"erro": "token"})
-            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if n < 0:
+                return self._responde(400, {"erro": "Content-Length inválido"})
             if n > MAX_CORPO:
                 return self._responde(413, {"erro": "corpo grande demais"})
             try:

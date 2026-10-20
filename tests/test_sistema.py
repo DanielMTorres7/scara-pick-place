@@ -63,7 +63,7 @@ def test_estado(servidor):
 
 def test_404_vira_cancelled(servidor):
     url, _, respostas = servidor
-    respostas.append((404, {"detail": "x"}))
+    respostas.append((404, {"detail": "OS não encontrada."}))
     assert Sistema(url, "tok").estado() == "cancelled"
 
 
@@ -86,3 +86,17 @@ def test_401_levanta_sem_repetir(servidor):
 def test_rede_fora_levanta():
     with pytest.raises(SistemaIndisponivel):
         Sistema("http://127.0.0.1:1/api/robo/OS-1", "tok", tentativas=2, espera=0).estado()
+
+
+def test_404_de_rota_nao_e_cancelamento(servidor):
+    """I5: 404 genérico (rota/EMR_URL errado) não pode virar "cancelled" """
+    url, _, respostas = servidor
+    respostas.append((404, {"detail": "Not Found"}))
+    with pytest.raises(SistemaIndisponivel):
+        Sistema(url, "tok", tentativas=1, espera=0).estado()
+
+
+def test_404_os_nao_encontrada_e_cancelamento(servidor):
+    url, _, respostas = servidor
+    respostas.append((404, {"detail": "OS não encontrada."}))
+    assert Sistema(url, "tok").estado() == "cancelled"
