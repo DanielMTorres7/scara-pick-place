@@ -3,6 +3,7 @@ from pathlib import Path
 
 NOME_CAM = "C920"
 IDX_PADRAO = 1  # Windows (DirectShow): índice da C920 com a câmera do notebook no 0
+FOCO = 0        # foco manual da C920 (0 = infinito): o autofoco caça e borra a imagem depois de um reset no USB
 SYSFS = Path("/sys/class/video4linux")
 
 
@@ -32,6 +33,7 @@ class Cam:
         # MJPG: sem isso a C920 entrega 1080p a ~5 fps em YUYV no Linux
         self.c.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         self.c.set(cv2.CAP_PROP_FRAME_WIDTH, w); self.c.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+        self.c.set(cv2.CAP_PROP_AUTOFOCUS, 0); self.c.set(cv2.CAP_PROP_FOCUS, FOCO)
         for _ in range(10): self.c.read()
     def foto(self, arq=None, descarta=5):
         for _ in range(descarta): self.c.read()

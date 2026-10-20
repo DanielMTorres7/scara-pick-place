@@ -1,6 +1,6 @@
 """Controle do SCARA pelas placas ScaraNode (firmware "painel" no.py, JSON por linha na USB).
 
-Placa 801c (modo "dois"): J1 no DM556, J2 no TMC2209 (1/16, 1,3 A).   Placa 5b1c (modo "tmc"): Z no TMC2209 (1/16, 1,3 A).
+Placa 801c (modo "dois"): J1 no DM556, J2 no TMC2209 (1/16, 1,35 A).   Placa 5b1c (modo "tmc"): Z no TMC2209 (1/16, 1,35 A).
 Movimentos ponto a ponto, um eixo por vez, com velocidade limitada por FATOR_VEL.
 """
 import base64
