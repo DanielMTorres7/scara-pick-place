@@ -15,11 +15,6 @@ def test_acel_chega_na_velocidade_com_um_quarto_do_curso():
     assert v * v / (2 * a) == pytest.approx(delta / 4)
 
 
-def test_perda_em_graus_usa_so_a_componente_na_direcao_da_junta():
-    assert demo.perda_graus((10.0, 3.0), (5.0, 0.0)) == pytest.approx(2.0)
-    assert demo.perda_graus((-10.0, 0.0), (5.0, 0.0)) == pytest.approx(-2.0)
-
-
 def _xadrez():
     import numpy as np
     img = np.full((1080, 1920, 3), 235, np.uint8)
@@ -54,3 +49,11 @@ def test_limita_respeita_rpm_e_aceleracao_medidas():
     v, a = demo.limita("j2", 150, 160)               # abaixo dos limites: rpm pedida, aceleração da rampa normal
     assert v == pytest.approx(demo.vel("j2", 150))
     assert a == pytest.approx(demo.acel(v, 160))
+
+
+def test_perdas_separa_as_duas_juntas():
+    g = {"j1": (-4.7, -12.0), "j2": (-5.0, -3.3)}
+    erro = tuple(2.0 * a - 1.5 * b for a, b in zip(g["j1"], g["j2"]))     # j1 +2°, j2 -1.5°
+    p = demo.perdas(erro, g)
+    assert p["j1"] == pytest.approx(2.0)
+    assert p["j2"] == pytest.approx(-1.5)

@@ -51,9 +51,10 @@ def limita(eixo, rpm, curso):
     return v, min(acel(v, curso), amax)
 
 
-def perda_graus(erro, g):
-    """erro da ponta (px) -> graus de junta, pela componente na direção em que a junta move a ponta (g, px/°)"""
-    return float(np.dot(erro, g) / np.dot(g, g))
+def perdas(erro, g):
+    """erro da ponta (px) -> graus perdidos em cada junta: erro = g_j1·Δj1 + g_j2·Δj2"""
+    d = np.linalg.solve(np.column_stack([g["j1"], g["j2"]]), np.asarray(erro, float))
+    return {"j1": float(d[0]), "j2": float(d[1])}
 
 
 XADREZ = (5, 6)                  # cantos internos visíveis do tabuleiro da mesa (os cabos tapam o resto)
@@ -139,8 +140,8 @@ class Demo:
         for _ in range(n):
             self.r.ir("z", b, fator=f); self.r.ir("z", a, fator=f)
 
-    def erro_juntas(self, eixo):
-        """(px, graus perdidos, px que a câmera andou), já descontando o movimento da câmera"""
+    def erro_juntas(self):
+        """(px, {junta: graus perdidos}, px que a câmera andou), já descontando o movimento da câmera"""
         fs = self.fotos_na_ref()
         M = None
         for f in fs:                         # alguém passando na frente do tabuleiro numa foto não derruba o teste
@@ -158,8 +159,8 @@ class Demo:
                 raise RuntimeError("ponta não encontrada: perdeu passo demais para medir pela câmera")
             p = h["c"]
         erro = np.subtract(p, esp)
-        g = M[:, :2] @ self.g[eixo]
-        return float(np.hypot(*erro)), perda_graus(erro, g), math.dist(esp, self.ref_px)
+        g = {k: M[:, :2] @ v for k, v in self.g.items()}
+        return float(np.hypot(*erro)), perdas(erro, g), math.dist(esp, self.ref_px)
 
     def erro_z(self):
         zc = self.r.referenciar_z(vbusca=20.0)
@@ -182,16 +183,17 @@ class Demo:
                     e = self.erro_z(); ok = abs(e) <= LIMITE_Z_MM and not bateu
                     print("  Z: fim de curso a %+.2f mm do esperado%s" % (e, bateu))
                 else:
-                    self.junta(eixo, rpm); e, graus, cam = self.erro_juntas(eixo)
-                    base = graus if base is None else base
-                    ok = abs(graus - base) <= LIMITE_GRAUS
-                    print("  ponta a %.1f px da referência: %s em %+.2f° (%+.2f° além da base)%s" % (
-                        e, eixo, graus, graus - base, "  (câmera andou %.0f px, descontado)" % cam if cam > 3 else ""))
+                    self.junta(eixo, rpm); e, d, cam = self.erro_juntas()
+                    base = d if base is None else base
+                    alem = {k: d[k] - base[k] for k in d}      # a outra junta também conta: a reação pode arrastá-la
+                    ok = all(abs(v) <= LIMITE_GRAUS for v in alem.values())
+                    print("  ponta a %.1f px da referência; além da base: %s%s" % (
+                        e, ", ".join("%s %+.2f°" % kv for kv in alem.items()),
+                        "  (câmera andou %.0f px, descontado)" % cam if cam > 3 else ""))
                 if not ok:
                     print("  PERDEU PASSO: %s fica em %s rpm" % (eixo, seguro.get(eixo, "<%d" % degraus[0])))
-                    if eixo != "z":              # a placa passa a saber onde a junta está de verdade
-                        self.r.definir(eixo, self.r.posicao(eixo) + graus - base)
-                        print("  %s corrigida em %+.2f°" % (eixo, graus - base))
+                    if eixo != "z":              # a placa passa a saber onde as juntas estão de verdade
+                        self.corrige(alem)
                     break
                 seguro[eixo] = rpm
         return seguro
@@ -205,8 +207,15 @@ class Demo:
             for j1, j2 in SHOW:
                 self.r.ir_juntas(j1, j2, vmax=vj, amax=aj)
                 self.r.ir("z", CURSO["z"][0], fator=f); self.r.ir("z", REF[2], fator=f)
-        e, graus, cam = self.erro_juntas("j1")
-        print("ponta a %.1f px da referência (câmera andou %.0f px, descontado)" % (e, cam))
+        e, d, cam = self.erro_juntas()
+        print("ponta a %.1f px da referência: %s (câmera andou %.0f px, descontado)" % (
+            e, ", ".join("%s %+.2f°" % kv for kv in d.items()), cam))
+        return d
+
+    def corrige(self, d):
+        for k, v in d.items():
+            self.r.definir(k, self.r.posicao(k) + v)
+        print("  corrigido: %s" % ", ".join("%s %+.2f°" % kv for kv in d.items()))
 
     def fechar(self):
         self.c.fechar(); self.r.fechar()
