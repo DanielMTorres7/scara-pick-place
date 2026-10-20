@@ -7,3 +7,4 @@ __pycache__/
 *.env
 .venv/
 .superpowers/
+os_progresso.json
