@@ -57,3 +57,11 @@ def test_perdas_separa_as_duas_juntas():
     p = demo.perdas(erro, g)
     assert p["j1"] == pytest.approx(2.0)
     assert p["j2"] == pytest.approx(-1.5)
+
+
+def test_cantos_do_tabuleiro_iguais_em_chamadas_repetidas():
+    import numpy as np
+    f = _xadrez()
+    cs = [demo.cantos_xadrez(f) for _ in range(10)]
+    assert all(c is not None for c in cs)
+    assert all(np.allclose(c, cs[0]) for c in cs)

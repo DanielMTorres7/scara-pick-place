@@ -64,7 +64,7 @@ def cantos_xadrez(f):
     """cantos internos do tabuleiro verde/marrom (px) ou None"""
     m = cv2.inRange(cv2.cvtColor(f, cv2.COLOR_BGR2HSV), (40, 60, 60), (90, 255, 255))
     g = 255 - cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-    ok, c = cv2.findChessboardCornersSB(g, XADREZ, flags=cv2.CALIB_CB_EXHAUSTIVE)
+    ok, c = cv2.findChessboardCornersSB(g, XADREZ, flags=cv2.CALIB_CB_ACCURACY)   # EXHAUSTIVE é aleatório: falhava ~30%
     return c.reshape(-1, 2) if ok else None
 
 
