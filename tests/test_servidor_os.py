@@ -225,3 +225,22 @@ def test_sem_conexao_503(tmp_path):
                                       ("192.168.0.5", False), ("10.0.0.1", False)])
 def test_eh_local(ip, local):
     assert eh_local(ip) is local
+
+
+def _conectar_cru(url, headers, corpo=b'{"token": "nnnnnnnnnnnnnnnnnnnnnnnn", "emr_url": "http://127.0.0.1:8765"}'):
+    import http.client
+    host, port = url.replace("http://", "").split(":")
+    c = http.client.HTTPConnection(host, int(port), timeout=3)
+    c.request("POST", "/conectar", body=corpo, headers=headers)
+    return c.getresponse().status
+
+
+def test_conectar_recusa_pedido_de_navegador(srv, conexao):
+    """página maliciosa no navegador local: tem Origin, ou não manda JSON, ou chega por DNS rebinding"""
+    url, _ = srv
+    porta = url.rsplit(":", 1)[1]
+    assert _conectar_cru(url, {"Content-Type": "application/json", "Origin": "http://evil.com"}) == 403
+    assert _conectar_cru(url, {"Content-Type": "text/plain"}) == 415
+    assert _conectar_cru(url, {"Content-Type": "application/json", "Host": "evil.com:" + porta}) == 403
+    assert conexao.token == TOKEN
+    assert _conectar_cru(url, {"Content-Type": "application/json"}) == 200

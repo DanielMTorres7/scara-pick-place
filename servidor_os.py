@@ -14,14 +14,13 @@ Uso: python servidor_os.py [--porta 8770]
 """
 import argparse
 import hmac
-import ipaddress
 import json
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from conexao import Conexao, valida_conexao
+from conexao import Conexao, eh_local, valida_conexao
 
 MAX_CORPO = 64 * 1024
 ESPERA_ENCERRAR = 20.0   # s que um job já encerrando (estacionando) tem para liberar o braço a uma OS nova
@@ -59,17 +58,6 @@ def valida_pedido(corpo):
 def callback_de(emr_url, os_):
     """endpoint do sistema para os eventos desta OS"""
     return "%s/api/robo/%s" % (emr_url.rstrip("/"), urllib.parse.quote(os_, safe=""))
-
-
-def eh_local(ip):
-    """o pedido veio da própria máquina (inclui IPv4 mapeado em IPv6)"""
-    try:
-        a = ipaddress.ip_address(ip)
-    except ValueError:
-        return False
-    if isinstance(a, ipaddress.IPv6Address) and a.ipv4_mapped:
-        a = a.ipv4_mapped
-    return a.is_loopback
 
 
 def cria_servidor(porta, conexao, novo_job):
@@ -117,8 +105,14 @@ def cria_servidor(porta, conexao, novo_job):
             return json.loads(self.rfile.read(n) or b"null")
 
         def _conectar(self):
-            if not eh_local(self.client_address[0]):
-                return self._responde(403, {"erro": "conexão só pela própria máquina"})
+            # Só o backend do sistema, na própria máquina, conecta o braço. Um navegador aberto aqui também fala
+            # com 127.0.0.1, então: sem Origin (navegador sempre manda num POST de outra página), JSON obrigatório
+            # (força preflight de CORS, que este servidor não responde) e Host local (bloqueia DNS rebinding).
+            host = urllib.parse.urlsplit("//" + (self.headers.get("Host") or "")).hostname
+            if not eh_local(self.client_address[0]) or self.headers.get("Origin") or not eh_local(host):
+                return self._responde(403, {"erro": "conexão só pelo sistema na própria máquina"})
+            if (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/json":
+                return self._responde(415, {"erro": "use application/json"})
             try:
                 token, emr_url = valida_conexao(self._corpo())
             except ValueError as e:

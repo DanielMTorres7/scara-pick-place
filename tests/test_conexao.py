@@ -32,3 +32,15 @@ def test_valida_conexao_ok():
 def test_valida_conexao_recusa(ruim):
     with pytest.raises(ValueError):
         valida_conexao(ruim)
+
+
+@pytest.mark.parametrize("url", ["http://192.168.0.10:8765", "http://evil.com", "http://u:p@127.0.0.1:8765",
+                                 "http://127.0.0.1.evil.com:8765"])
+def test_emr_url_so_na_propria_maquina(url):
+    with pytest.raises(ValueError):
+        valida_conexao({"token": TOKEN, "emr_url": url})
+
+
+@pytest.mark.parametrize("url", ["http://localhost:8765", "http://[::1]:8765", "https://127.0.0.1"])
+def test_emr_url_local_aceita(url):
+    assert valida_conexao({"token": TOKEN, "emr_url": url})[1] == url

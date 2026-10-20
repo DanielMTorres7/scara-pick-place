@@ -1,10 +1,27 @@
 """Com qual sistema EMR o braço está conectado: token compartilhado e endereço do EMR, gravados quando o operador
 clica "Conectar braço" na tela do sistema (POST /conectar). Fica em disco para valer depois de reiniciar."""
+import ipaddress
 import json
 import os
+import urllib.parse
 from pathlib import Path
 
 TOKEN_MIN = 16
+
+
+def eh_local(host):
+    """"localhost" ou IP de loopback (inclui IPv4 mapeado em IPv6)"""
+    if host is None:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        a = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    if isinstance(a, ipaddress.IPv6Address) and a.ipv4_mapped:
+        a = a.ipv4_mapped
+    return a.is_loopback
 
 
 def valida_conexao(corpo):
@@ -16,6 +33,10 @@ def valida_conexao(corpo):
         raise ValueError("token: texto com %d+ caracteres" % TOKEN_MIN)
     if not isinstance(url, str) or not url.startswith(("http://", "https://")):
         raise ValueError("emr_url: URL http(s)")
+    partes = urllib.parse.urlsplit(url)
+    # sistema e braço na mesma máquina: o token só vai para um endereço local, sem usuário/senha na URL
+    if partes.username or partes.password or not eh_local(partes.hostname):
+        raise ValueError("emr_url: só o sistema da própria máquina (localhost)")
     return token, url.rstrip("/")
 
 
