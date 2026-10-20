@@ -36,6 +36,10 @@ FREQ = 10_000_000  # relógio do gerador de passos da placa
 TJ_DMIN = 50
 
 
+class MovimentoAbortado(RuntimeError):
+    """a placa parou o eixo antes do alvo (24 V, fim de curso, emergência...)"""
+
+
 def perfil_sincrono(deltas, vmax, amax):
     """trapézio com a mesma forma no tempo para todas as juntas (começam e terminam juntas).
     Devolve (T, f): duração total e fração de aceleração (ta = f*T)."""
@@ -190,10 +194,14 @@ class Scara:
             raise ValueError("%s=%.2f fora de [%s, %s]" % (eixo, alvo, e["min"], e["max"]))
         f = self.fator_vel if fator is None else fator
         pl = self.placas[e["placa"]]
+        n0 = len(pl.eventos)
         pl.cmd("ir", k=e["k"], p=int(round(alvo * e["passos_un"])),
                v=e["v"] * f * e["passos_un"], a=e["a"] * f * e["passos_un"])
         if esperar:
-            self.esperar(e["placa"])
+            p = self.esperar(e["placa"])["pk"][e["k"]]
+            if p != int(round(alvo * e["passos_un"])):
+                raise MovimentoAbortado("%s parou em %.2f, alvo %.2f: %s" % (
+                    eixo, p / e["passos_un"], alvo, "; ".join(pl.eventos[n0:]) or "sem evento"))
 
     def ir_juntas(self, j1, j2, vmax=None, amax=None):
         """J1 e J2 juntos (trajetória sincronizada na placa do braço), perfil trapezoidal"""

@@ -13,7 +13,7 @@ from cam import Cam
 from caixa import acha_caixas
 from modelo import Modelo
 from ponta import ponta_precisa
-from scara import Scara, Z_TOQUE_MESA
+from scara import MovimentoAbortado, Scara, Z_TOQUE_MESA
 
 Z_ALTO = -40.0          # altura de deslocamento (ventosa ~65 mm acima de uma caixa de 30 mm)
 FOLGA_LENTA = 10.0      # mm acima do toque em que a descida passa a ser lenta
@@ -63,7 +63,12 @@ def main(roi=None, tol_mm=1.5, max_iter=3, descer=True, altura_caixa=modelo.ALTU
         if descer:
             z_toque = Z_TOQUE_MESA + altura_caixa
             r.ir("z", z_toque + FOLGA_LENTA)
-            r.ir("z", z_toque, fator=V_TOQUE)
+            try:
+                r.ir("z", z_toque, fator=V_TOQUE)
+            except MovimentoAbortado as ex:   # o fim de curso de baixo aciona antes de encostar numa caixa baixa
+                if "FIM" not in str(ex):
+                    raise
+                print("fim de curso de baixo antes de encostar:", ex)
             print("encostou: z = %.2f" % r.posicao("z"))
             c.foto("fotos/ir_caixa_toque.jpg")
         return {"caixa_mm": (x, y), "juntas": cmd, "erro_mm": e}
