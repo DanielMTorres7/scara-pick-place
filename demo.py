@@ -141,8 +141,9 @@ class Demo:
                         e, eixo, graus, "  (câmera andou %.0f px, descontado)" % cam if cam > 3 else ""))
                 if not ok:
                     print("  PERDEU PASSO: %s fica em %s rpm" % (eixo, seguro.get(eixo, "<%d" % DEGRAUS[0])))
-                    if eixo != "z":
-                        return seguro    # posição da junta perdida: re-zerar (diagnostico.py) antes de seguir
+                    if eixo != "z":              # a placa passa a saber onde a junta está de verdade
+                        self.r.definir(eixo, self.r.posicao(eixo) + graus)
+                        print("  %s corrigida em %+.2f°" % (eixo, graus))
                     break
                 seguro[eixo] = rpm
         return seguro
