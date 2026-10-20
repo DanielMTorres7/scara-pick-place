@@ -120,6 +120,31 @@ python calibrar.py                 # refaz o ajuste a partir de dados_grade.json
 As alturas e as folgas ficam no topo de `pick_place.py` (`Z_PEGA`, `Z_SOLTA`, `ALTURA_COLETORA`...),
 e as velocidades no topo de `scara.py`.
 
+## Integração com o EMR (ordem de serviço)
+
+O sistema EMR (repositório `Software-Challenge-3EMR`) lança a OS e o braço a executa de verdade, devolvendo a
+contagem real de caixas soltas na coletora.
+
+```bash
+ROBO_TOKEN=<mesmo valor de EMR_ROBO_TOKEN> uv run python servidor_os.py --porta 8770
+```
+
+No `.env` do EMR: `EMR_ROBO_TOKEN`, `EMR_ROBO_CODE` (código do separador que é o braço),
+`EMR_OS_JSON_URL=http://<este notebook>:8770/os` e `EMR_PUBLIC_BASE_URL` (endereço do EMR visto daqui).
+
+1. O EMR faz `POST /os` com `{"os", "cliente", "quantidade", "separadas", "itens": [{"nome", "quantidade", ...}], "callback"}`.
+   O braço responde 202 e trabalha em segundo plano (uma OS por vez; a mesma OS de novo = retomada).
+2. Foto da mesa, nomes pelo Gemini, fila na ordem e na quantidade pedidas (`selecao.py`).
+3. A cada caixa solta: `POST {callback}/evento {"tipo": "unit", "separadas": N}`. A resposta traz o estado da OS:
+   pausada = o braço termina a caixa, estaciona e espera; cancelada/concluída = encerra.
+4. Faltou caixa na mesa: evento `faltando` e o EMR pausa com "Remédios faltando: …". Reponha e retome: nova foto,
+   só o que falta.
+5. Erro (placa, fim de curso, 24 V): o braço para, avisa `erro` (o EMR pausa) e solta as portas. Rode
+   `diagnostico.py --corrigir` e retome a OS no sistema.
+
+O progresso por remédio fica em `os_progresso.json`, então o braço continua de onde parou se o processo cair.
+Rode o servidor de dentro desta pasta (as fotos vão para `fotos/`).
+
 ## Arquivos
 
 | Arquivo | O que faz |
@@ -132,6 +157,9 @@ e as velocidades no topo de `scara.py`.
 | `pick_place.py` | ciclo completo, caixa coletora, colisão, nomes pelo Gemini, relé |
 | `diagnostico.py` | mede pela câmera quanto J1/J2 saíram do modelo e corrige |
 | `bomba.py` | relé da bomba de vácuo |
+| `servidor_os.py` | recebe a OS do EMR (HTTP) e roda o job |
+| `job_os.py` | executa a OS: pausa, faltando, cancelamento, erro, aviso ao sistema |
+| `selecao.py`, `progresso.py`, `sistema.py` | escolha das caixas, progresso salvo, cliente do EMR |
 | `cam.py`, `medir_rot.py`, `ir_caixa.py` | câmera, medida de rotação entre fotos, teste de ir até uma caixa |
 
 ## Limitações conhecidas

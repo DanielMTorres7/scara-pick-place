@@ -160,3 +160,12 @@ def test_ultima_unit_encerra_sem_concluida(tmp_path, final):
     sis = SistemaFalso(eventos=[final])
     _job(tmp_path, ex, sis, itens=[], quantidade=1).rodar()
     assert _tipos(sis) == [("unit", 1)]
+
+
+def test_falha_ao_abrir_hardware_manda_erro(tmp_path):
+    def quebra():
+        raise RuntimeError("placa braco não encontrada")
+    sis = SistemaFalso()
+    pedido = {"os": "OS-1", "itens": ITENS, "quantidade": 3, "separadas": 0}
+    JobOS(pedido, quebra, sis, Progresso(tmp_path / "p.json"), espera_pausa=0, dormir=lambda s: None).rodar()
+    assert sis.eventos == [("erro", 0, {"mensagem": "placa braco não encontrada"})]

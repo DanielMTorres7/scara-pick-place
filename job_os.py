@@ -81,7 +81,12 @@ class JobOS:
     def rodar(self):
         p = self.pedido
         self.feitos = reconcilia(self.itens, self.quantidade, p["separadas"], self.progresso.carrega(self.os))
-        ex = self.factory()
+        try:
+            ex = self.factory()
+        except Exception as e:
+            print("OS %s: ERRO ao abrir o braço: %s" % (self.os, e))
+            self._erro(e)
+            return
         try:
             while True:
                 est = self._ciclo(ex) if self._pendentes() else "running"
@@ -106,9 +111,12 @@ class JobOS:
         except Exception as e:
             print("OS %s: ERRO %s" % (self.os, e))
             ex.parar()
-            try:
-                self.sistema.evento("erro", self._total(), mensagem=str(e))
-            except SistemaIndisponivel:
-                pass
+            self._erro(e)
         finally:
             ex.fechar()
+
+    def _erro(self, e):
+        try:
+            self.sistema.evento("erro", self._total(), mensagem=str(e))
+        except SistemaIndisponivel:
+            pass
