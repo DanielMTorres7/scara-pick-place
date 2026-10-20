@@ -8,3 +8,4 @@ __pycache__/
 .venv/
 .superpowers/
 os_progresso.json
+braco_conexao.json

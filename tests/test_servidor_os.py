@@ -5,7 +5,10 @@ import urllib.request
 
 import pytest
 
-from servidor_os import callback_de, cria_servidor, valida_pedido
+from conexao import Conexao
+from servidor_os import callback_de, cria_servidor, eh_local, valida_pedido
+
+TOKEN = "t" * 20
 
 PEDIDO = {"os": "OS-1", "cliente": "Fulano", "quantidade": 3, "separadas": 0,
           "itens": [{"remedio_id": "1", "remedio": "MICPURE 10MG", "nome": "micpure", "quantidade": 2},
@@ -30,14 +33,21 @@ class JobFalso:
 
 
 @pytest.fixture
-def srv():
+def conexao(tmp_path):
+    c = Conexao(tmp_path / "conexao.json")
+    c.salva(TOKEN, "http://127.0.0.1:8765")
+    return c
+
+
+@pytest.fixture
+def srv(conexao):
     jobs = []
 
     def novo_job(pedido):
         jobs.append(JobFalso(pedido))
         return jobs[-1]
 
-    s = cria_servidor(0, "tok", novo_job)
+    s = cria_servidor(0, conexao, novo_job)
     threading.Thread(target=s.serve_forever, daemon=True).start()
     yield "http://127.0.0.1:%d" % s.server_address[1], jobs
     for j in jobs:
@@ -45,7 +55,7 @@ def srv():
     s.shutdown()
 
 
-def _req(url, corpo=None, token="tok", metodo="POST"):
+def _req(url, corpo=None, token=TOKEN, metodo="POST"):
     dados = json.dumps(corpo).encode() if corpo is not None else None
     h = {"Content-Type": "application/json"}
     if token:
@@ -107,10 +117,10 @@ def test_job_terminado_aceita_nova(srv):
 
 def test_saude(srv):
     url, jobs = srv
-    assert _req(url + "/saude", metodo="GET") == (200, {"ocupado": False, "os": None})
+    assert _req(url + "/saude", metodo="GET") == (200, {"ocupado": False, "os": None, "conectado": True})
     _req(url + "/os", PEDIDO)
     jobs[0].rodou.wait(2)
-    assert _req(url + "/saude", metodo="GET") == (200, {"ocupado": True, "os": "OS-1"})
+    assert _req(url + "/saude", metodo="GET") == (200, {"ocupado": True, "os": "OS-1", "conectado": True})
 
 
 @pytest.mark.parametrize("ruim", [
@@ -167,7 +177,7 @@ def test_content_length_ruim_400(srv, n):
     host, port = url.replace("http://", "").split(":")
     c = http.client.HTTPConnection(host, int(port), timeout=3)
     c.putrequest("POST", "/os")
-    c.putheader("Authorization", "Bearer tok")
+    c.putheader("Authorization", "Bearer " + TOKEN)
     c.putheader("Content-Length", n)
     c.endheaders()
     assert c.getresponse().status == 400
@@ -183,3 +193,35 @@ def test_saude_nao_espera_job_encerrando(srv):
     t = time.monotonic()
     assert _req(url + "/saude", metodo="GET")[1]["ocupado"] is True
     assert time.monotonic() - t < 1.0
+
+
+def test_conectar_grava_e_vale_para_a_proxima_os(srv, conexao, tmp_path):
+    url, jobs = srv
+    novo = "n" * 24
+    st, corpo = _req(url + "/conectar", {"token": novo, "emr_url": "http://127.0.0.1:9999/"}, token=None)
+    assert (st, corpo) == (200, {"conectado": True})
+    assert Conexao(conexao.caminho).token == novo and conexao.emr_url == "http://127.0.0.1:9999"
+    assert _req(url + "/os", PEDIDO)[0] == 401              # token antigo não vale mais
+    assert _req(url + "/os", PEDIDO, token=novo)[0] == 202
+
+
+def test_conectar_invalido_400(srv):
+    url, _ = srv
+    assert _req(url + "/conectar", {"token": "curto", "emr_url": "http://x"}, token=None)[0] == 400
+
+
+def test_sem_conexao_503(tmp_path):
+    s = cria_servidor(0, Conexao(tmp_path / "nada.json"), lambda p: None)
+    threading.Thread(target=s.serve_forever, daemon=True).start()
+    url = "http://127.0.0.1:%d" % s.server_address[1]
+    try:
+        assert _req(url + "/os", PEDIDO)[0] == 503
+        assert _req(url + "/saude", metodo="GET")[1]["conectado"] is False
+    finally:
+        s.shutdown()
+
+
+@pytest.mark.parametrize("ip,local", [("127.0.0.1", True), ("::1", True), ("::ffff:127.0.0.1", True),
+                                      ("192.168.0.5", False), ("10.0.0.1", False)])
+def test_eh_local(ip, local):
+    assert eh_local(ip) is local

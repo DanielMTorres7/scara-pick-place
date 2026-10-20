@@ -1,22 +1,27 @@
 """Servidor HTTP do braço: o sistema EMR manda a OS (POST /os) e o braço a executa em segundo plano (job_os),
-avisando o sistema a cada caixa em EMR_URL/api/robo/<os>. Uma OS por vez. O endereço do sistema vem da
-configuração do braço, nunca do pedido: o token não vai para uma URL escolhida por quem manda a OS.
+avisando o sistema a cada caixa em <emr>/api/robo/<os>. Uma OS por vez.
 
-  POST /os     Authorization: Bearer <ROBO_TOKEN>    -> 202 aceita | 400 inválida | 401 token | 409 ocupado
-               (a mesma OS de novo com o job vivo = retomada: 202 sem novo job)
-  GET  /saude  -> {"ocupado": bool, "os": str|null}
+A conexão com o sistema é feita pela tela dele ("Conectar braço"): o sistema manda o token e o próprio endereço
+para POST /conectar, que só é aceito da própria máquina, e o braço guarda em braco_conexao.json. O endereço do
+sistema nunca vem do pedido da OS: o token não vai para uma URL escolhida por quem manda a OS.
 
-Uso: ROBO_TOKEN=... EMR_URL=http://<emr>:8765 python servidor_os.py [--porta 8770]
+  POST /conectar {token, emr_url}                   -> 200 | 400 inválido | 403 não é local
+  POST /os     Authorization: Bearer <token>        -> 202 aceita | 400 inválida | 401 token | 409 ocupado
+               (a mesma OS de novo com o job vivo = retomada: 202 sem novo job) | 503 braço não conectado
+  GET  /saude  -> {"ocupado": bool, "os": str|null, "conectado": bool}
+
+Uso: python servidor_os.py [--porta 8770]
 """
 import argparse
 import hmac
+import ipaddress
 import json
-import os
-import sys
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+from conexao import Conexao, valida_conexao
 
 MAX_CORPO = 64 * 1024
 ESPERA_ENCERRAR = 20.0   # s que um job já encerrando (estacionando) tem para liberar o braço a uma OS nova
@@ -56,7 +61,18 @@ def callback_de(emr_url, os_):
     return "%s/api/robo/%s" % (emr_url.rstrip("/"), urllib.parse.quote(os_, safe=""))
 
 
-def cria_servidor(porta, token, novo_job):
+def eh_local(ip):
+    """o pedido veio da própria máquina (inclui IPv4 mapeado em IPv6)"""
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if isinstance(a, ipaddress.IPv6Address) and a.ipv4_mapped:
+        a = a.ipv4_mapped
+    return a.is_loopback
+
+
+def cria_servidor(porta, conexao, novo_job):
     estado = {"job": None, "thread": None}
     trava = threading.Lock()
 
@@ -85,24 +101,45 @@ def cria_servidor(porta, token, novo_job):
                 return self._responde(404, {"erro": "rota"})
             with trava:
                 vivo = ocupado()
-                return self._responde(200, {"ocupado": vivo, "os": estado["job"].os if vivo else None})
+                return self._responde(200, {"ocupado": vivo, "os": estado["job"].os if vivo else None,
+                                            "conectado": conexao.conectada})
 
-        def do_POST(self):
-            if self.path != "/os":
-                return self._responde(404, {"erro": "rota"})
-            auth = self.headers.get("Authorization", "")
-            if not hmac.compare_digest(auth.encode(), ("Bearer " + token).encode()):
-                return self._responde(401, {"erro": "token"})
+        def _corpo(self):
+            """JSON do corpo; levanta ValueError (vira 400) se o tamanho ou o JSON forem inválidos"""
             try:
                 n = int(self.headers.get("Content-Length") or 0)
             except ValueError:
                 n = -1
             if n < 0:
-                return self._responde(400, {"erro": "Content-Length inválido"})
+                raise ValueError("Content-Length inválido")
             if n > MAX_CORPO:
-                return self._responde(413, {"erro": "corpo grande demais"})
+                raise ValueError("corpo grande demais")
+            return json.loads(self.rfile.read(n) or b"null")
+
+        def _conectar(self):
+            if not eh_local(self.client_address[0]):
+                return self._responde(403, {"erro": "conexão só pela própria máquina"})
             try:
-                pedido = valida_pedido(json.loads(self.rfile.read(n) or b"null"))
+                token, emr_url = valida_conexao(self._corpo())
+            except ValueError as e:
+                return self._responde(400, {"erro": str(e)})
+            with trava:
+                conexao.salva(token, emr_url)
+            print("braço conectado ao sistema em %s" % emr_url)
+            return self._responde(200, {"conectado": True})
+
+        def do_POST(self):
+            if self.path == "/conectar":
+                return self._conectar()
+            if self.path != "/os":
+                return self._responde(404, {"erro": "rota"})
+            if not conexao.conectada:
+                return self._responde(503, {"erro": "braço não conectado: use 'Conectar braço' no sistema"})
+            auth = self.headers.get("Authorization", "")
+            if not hmac.compare_digest(auth.encode(), ("Bearer " + conexao.token).encode()):
+                return self._responde(401, {"erro": "token"})
+            try:
+                pedido = valida_pedido(self._corpo())
             except ValueError as e:      # JSONDecodeError também é ValueError
                 return self._responde(400, {"erro": str(e)})
             espera_encerrar()
@@ -128,26 +165,23 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--porta", type=int, default=8770)
     args = ap.parse_args()
-    token = os.environ.get("ROBO_TOKEN", "").strip()
-    if not token:
-        sys.exit("defina ROBO_TOKEN (o mesmo valor de EMR_ROBO_TOKEN no sistema)")
-    emr_url = os.environ.get("EMR_URL", "").strip()
-    if not emr_url.startswith(("http://", "https://")):
-        sys.exit("defina EMR_URL (endereço do sistema EMR, ex.: http://127.0.0.1:8765)")
 
     from job_os import JobOS
     from pick_place import PickPlace
     from progresso import Progresso
     from sistema import Sistema
 
-    progresso = Progresso(Path(__file__).resolve().parent / "os_progresso.json")
+    pasta = Path(__file__).resolve().parent
+    progresso = Progresso(pasta / "os_progresso.json")
+    conexao = Conexao(pasta / "braco_conexao.json")
 
     def novo_job(pedido):
         return JobOS(pedido, lambda: PickPlace(com_nomes=bool(pedido["itens"])),
-                     Sistema(callback_de(emr_url, pedido["os"]), token), progresso)
+                     Sistema(callback_de(conexao.emr_url, pedido["os"]), conexao.token), progresso)
 
-    srv = cria_servidor(args.porta, token, novo_job)
-    print("braço esperando OS em http://0.0.0.0:%d/os" % args.porta)
+    srv = cria_servidor(args.porta, conexao, novo_job)
+    estado = "conectado a %s" % conexao.emr_url if conexao.conectada else "aguardando 'Conectar braço' no sistema"
+    print("braço esperando OS em http://0.0.0.0:%d/os (%s)" % (args.porta, estado))
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

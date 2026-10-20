@@ -126,17 +126,19 @@ O sistema EMR (repositório `Software-Challenge-3EMR`) lança a OS e o braço a 
 contagem real de caixas soltas na coletora.
 
 ```bash
-ROBO_TOKEN=<mesmo valor de EMR_ROBO_TOKEN> EMR_URL=http://<emr>:8765 uv run python servidor_os.py --porta 8770
+uv run python servidor_os.py --porta 8770
 ```
 
-No `.env` do EMR: `EMR_ROBO_TOKEN`, `EMR_ROBO_CODE` (código do separador que é o braço),
-e `EMR_OS_JSON_URL=http://<este notebook>:8770/os`. O endereço do EMR fica só no `EMR_URL` do braço: o token
-nunca é enviado para um endereço que venha no pedido.
+Sem variáveis de ambiente: com o sistema e o braço no mesmo notebook, abra o sistema, clique em **Braço** no
+cabeçalho, escolha o separador que é o braço, mantenha o endereço `127.0.0.1:8770` e clique em **Conectar**. O
+sistema gera um token e manda para o braço (`POST /conectar`, aceito só da própria máquina), que guarda em
+`braco_conexao.json` e passa a usar o endereço do sistema que veio junto. A tela do ESP32 continua no botão
+**ESP32** (porta serial).
 
 1. O EMR faz `POST /os` com `{"os", "cliente", "quantidade", "separadas", "itens": [{"nome", "quantidade", ...}]}`.
    O braço responde 202 e trabalha em segundo plano (uma OS por vez; a mesma OS de novo = retomada).
 2. Foto da mesa, nomes pelo Gemini, fila na ordem e na quantidade pedidas (`selecao.py`).
-3. A cada caixa solta: `POST {EMR_URL}/api/robo/<os>/evento {"tipo": "unit", "separadas": N}`. A resposta traz o estado da OS:
+3. A cada caixa solta: `POST <sistema>/api/robo/<os>/evento {"tipo": "unit", "separadas": N}`. A resposta traz o estado da OS:
    pausada = o braço termina a caixa, estaciona e espera; cancelada/concluída = encerra.
 4. Faltou caixa na mesa: evento `faltando` e o EMR pausa com "Remédios faltando: …". Reponha e retome: nova foto,
    só o que falta.
@@ -160,7 +162,7 @@ Rode o servidor de dentro desta pasta (as fotos vão para `fotos/`).
 | `bomba.py` | relé da bomba de vácuo |
 | `servidor_os.py` | recebe a OS do EMR (HTTP) e roda o job |
 | `job_os.py` | executa a OS: pausa, faltando, cancelamento, erro, aviso ao sistema |
-| `selecao.py`, `progresso.py`, `sistema.py` | escolha das caixas, progresso salvo, cliente do EMR |
+| `selecao.py`, `progresso.py`, `sistema.py`, `conexao.py` | escolha das caixas, progresso salvo, cliente do EMR, conexão feita pela tela do sistema |
 | `cam.py`, `medir_rot.py`, `ir_caixa.py` | câmera, medida de rotação entre fotos, teste de ir até uma caixa |
 
 ## Limitações conhecidas
