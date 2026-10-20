@@ -2,6 +2,7 @@
 import cv2, numpy as np
 
 CENTRO_J1 = (1113.0, 690.0)   # eixo do J1 na imagem (medido girando o J1)
+BRILHO_CENTRO = 70            # centro do hexágono: ponta (engate branco) ~110, cotovelo (motor) ~30
 
 def hexagonos(f):
     hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
@@ -33,7 +34,7 @@ def acha_ponta(f, centro=CENTRO_J1):
         disco = np.zeros_like(g)
         cv2.circle(disco, (x, y), 18, 255, -1)
         h["brilho"] = cv2.mean(g, disco)[0]
-        if h["brilho"] > 110:
+        if h["brilho"] > BRILHO_CENTRO:
             cand.append(h)
     if not cand:
         return None

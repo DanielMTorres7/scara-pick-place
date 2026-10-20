@@ -1,0 +1,19 @@
+import cv2
+import numpy as np
+
+import ponta
+
+
+def _hexagono(img, c, r, centro_cinza):
+    pts = np.array([(c[0] + r * np.cos(a), c[1] + r * np.sin(a)) for a in np.radians(np.arange(0, 360, 60))], np.int32)
+    cv2.fillConvexPoly(img, pts, (110, 30, 8))                   # azul escuro do rolamento (BGR)
+    cv2.circle(img, c, 20, (centro_cinza,) * 3, -1)
+
+
+def test_ponta_com_centro_meio_escuro_ainda_e_ponta_e_cotovelo_escuro_nao():
+    img = np.full((1080, 1920, 3), 230, np.uint8)
+    _hexagono(img, (1460, 520), 72, 30)       # cotovelo: motor escuro no meio
+    _hexagono(img, (1650, 230), 61, 95)       # ponta com menos luz que na calibração antiga
+    p = ponta.acha_ponta(img)
+    assert p is not None
+    assert np.hypot(p["c"][0] - 1650, p["c"][1] - 230) < 3
