@@ -1,6 +1,6 @@
 """Demo de velocidade: sobe a rpm dos motores em degraus e confere pela câmera/fim de curso se perdeu passo.
 
-python demo.py teste                 # J1, J2 e Z a 300 -> 600 -> 900 rpm; para no 1º degrau que perder passo
+python demo.py teste [--eixos j2,z]  # J1, J2 e Z a 300 -> 600 -> 900 rpm; para no 1º degrau que perder passo
 python demo.py show --rpm 600        # vai e volta J1+J2 e sobe e desce o Z na rpm escolhida (a que passou no teste)
 """
 import argparse
@@ -45,6 +45,7 @@ class Demo:
 
     def ponta_na_ref(self, esperado=None):
         self.r.ir("z", REF[2])
+        self.r.ir_juntas(REF[0] - 10, REF[1] - 10, *LENTO)   # chega sempre pelo mesmo lado (folga)
         self.r.ir_juntas(REF[0], REF[1], *LENTO)
         time.sleep(0.5)
         p = ponta_precisa(self.c.foto(), esperado=esperado)
@@ -80,9 +81,9 @@ class Demo:
         self.r.definir("z", Z_CHAVE)
         return zc - Z_CHAVE
 
-    def teste(self):
+    def teste(self, eixos=("j1", "j2", "z")):
         seguro = {}
-        for eixo in ("j1", "j2", "z"):
+        for eixo in eixos:
             for rpm in DEGRAUS:
                 print("%s a %d rpm" % (eixo, rpm))
                 if eixo == "z":
@@ -118,11 +119,12 @@ if __name__ == "__main__":
     ap.add_argument("modo", choices=("teste", "show"))
     ap.add_argument("--rpm", type=float, default=600)
     ap.add_argument("--voltas", type=int, default=3)
+    ap.add_argument("--eixos", default="j1,j2,z", help="teste: eixos testados")
     a = ap.parse_args()
     d = Demo()
     try:
         if a.modo == "teste":
-            print("rpm seguras:", d.teste())
+            print("rpm seguras:", d.teste(a.eixos.split(",")))
         else:
             d.show(a.rpm, a.voltas)
     except BaseException:
