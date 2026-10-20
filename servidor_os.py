@@ -62,9 +62,14 @@ def cria_servidor(porta, token, novo_job):
 
     def ocupado():
         t = estado["thread"]
-        if t is not None and t.is_alive() and getattr(estado["job"], "encerrando", False):
-            t.join(ESPERA_ENCERRAR)      # cancelada/concluída/erro: só falta estacionar e soltar o hardware
         return t is not None and t.is_alive()
+
+    def espera_encerrar():
+        """job que já decidiu sair (cancelada/concluída/erro) só falta estacionar: espera fora da trava"""
+        with trava:
+            t, job = estado["thread"], estado["job"]
+        if t is not None and t.is_alive() and getattr(job, "encerrando", False):
+            t.join(ESPERA_ENCERRAR)
 
     class Handler(BaseHTTPRequestHandler):
         def _responde(self, status, corpo):
@@ -100,6 +105,7 @@ def cria_servidor(porta, token, novo_job):
                 pedido = valida_pedido(json.loads(self.rfile.read(n) or b"null"))
             except ValueError as e:      # JSONDecodeError também é ValueError
                 return self._responde(400, {"erro": str(e)})
+            espera_encerrar()
             with trava:
                 if ocupado():
                     if estado["job"].os == pedido["os"]:

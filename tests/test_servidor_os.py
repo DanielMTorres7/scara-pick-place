@@ -171,3 +171,15 @@ def test_content_length_ruim_400(srv, n):
     c.putheader("Content-Length", n)
     c.endheaders()
     assert c.getresponse().status == 400
+
+
+def test_saude_nao_espera_job_encerrando(srv):
+    """/saude (sem token) nunca bloqueia, nem com um job encerrando"""
+    import time
+    url, jobs = srv
+    _req(url + "/os", PEDIDO)
+    jobs[0].rodou.wait(2)
+    jobs[0].encerrando = True
+    t = time.monotonic()
+    assert _req(url + "/saude", metodo="GET")[1]["ocupado"] is True
+    assert time.monotonic() - t < 1.0
