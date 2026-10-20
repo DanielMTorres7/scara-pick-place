@@ -45,3 +45,12 @@ def test_movimento_da_camera_sem_tabuleiro_levanta():
     vazio = np.full((1080, 1920, 3), 235, np.uint8)
     with pytest.raises(RuntimeError, match="tabuleiro"):
         demo.mov_camera(vazio, vazio)
+
+
+def test_limita_respeita_rpm_e_aceleracao_medidas():
+    v, a = demo.limita("j1", 900, 120)
+    assert v == pytest.approx(demo.vel("j1", demo.LIMITES["j1"][0]))
+    assert a == pytest.approx(demo.LIMITES["j1"][1])
+    v, a = demo.limita("j2", 150, 160)               # abaixo dos limites: rpm pedida, aceleração da rampa normal
+    assert v == pytest.approx(demo.vel("j2", 150))
+    assert a == pytest.approx(demo.acel(v, 160))

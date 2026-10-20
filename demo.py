@@ -1,7 +1,7 @@
 """Demo de velocidade: sobe a rpm dos motores em degraus e confere pela câmera/fim de curso se perdeu passo.
 
 python demo.py teste [--eixos j2,z]  # J1, J2 e Z a 300 -> 600 -> 900 rpm; para no 1º degrau que perder passo
-python demo.py show --rpm 600        # vai e volta J1+J2 e sobe e desce o Z na rpm escolhida (a que passou no teste)
+python demo.py show --rpm 900        # poses com J1+J2 e Z, na rpm pedida limitada pelos LIMITES medidos
 """
 import argparse
 import math
@@ -38,6 +38,17 @@ def vel(eixo, rpm):
 def acel(v, delta):
     """aceleração que chega em v depois de 1/4 do curso (metade do movimento em velocidade máxima)"""
     return 2 * v * v / abs(delta)
+
+
+# medido em 2026-10-20 (demo.py teste, 5 ciclos, perda < 0,5° / 0,1 mm): rpm no motor e °/s² (Z: só rpm)
+LIMITES = {"j1": (300, 150.0), "j2": (400, 500.0), "z": (500, None)}
+
+
+def limita(eixo, rpm, curso):
+    """(velocidade, aceleração) da junta para `rpm`, sem passar dos limites medidos"""
+    rmax, amax = LIMITES[eixo]
+    v = vel(eixo, min(rpm, rmax))
+    return v, min(acel(v, curso), amax)
 
 
 def perda_graus(erro, g):
@@ -186,9 +197,10 @@ class Demo:
         return seguro
 
     def show(self, rpm, voltas):
-        vj = {k: vel(k, rpm) for k in RED}
-        aj = {k: acel(vj[k], CURSO[k][1] - CURSO[k][0]) for k in RED}
-        f = vel("z", rpm) / EIXOS["z"]["v"]
+        lim = {k: limita(k, rpm, CURSO[k][1] - CURSO[k][0]) for k in RED}
+        vj = {k: v for k, (v, _) in lim.items()}; aj = {k: a for k, (_, a) in lim.items()}
+        f = vel("z", min(rpm, LIMITES["z"][0])) / EIXOS["z"]["v"]
+        print("show: %s, Z %.0f mm/s" % (", ".join("%s %.0f °/s %.0f °/s²" % (k, vj[k], aj[k]) for k in RED), f * EIXOS["z"]["v"]))
         for _ in range(voltas):
             for j1, j2 in SHOW:
                 self.r.ir_juntas(j1, j2, vmax=vj, amax=aj)
