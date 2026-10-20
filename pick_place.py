@@ -6,11 +6,9 @@ Alturas (acima da mesa) e o Z correspondente: z = altura + Z_TOQUE_MESA (-135).
 
 Uso: python pick_place.py [--nome micpure]     (com --nome, o Gemini lê os nomes e só pega as caixas desse remédio)
 """
-import difflib
 import math
 import sys
 import time
-import unicodedata
 from pathlib import Path
 
 import cv2
@@ -22,6 +20,7 @@ from cam import Cam
 from modelo import ALTURA_CAIXA, Z_TOQUE_MESA, Modelo
 from ponta import ponta_precisa
 from scara import Scara
+from selecao import mesmo_nome
 
 ALTURA_COLETORA = 126.0   # mm (medido)
 FOLGA_SOLTA = 10.0        # fundo da caixa de remédio fica 1 cm acima da borda ao soltar
@@ -60,16 +59,6 @@ def obstaculo_mm(m, cantos_px, altura):
 
 
 VISAO = Path(__file__).resolve().parent.parent / "only-vision"
-
-
-def _norm(t):
-    return "".join(c for c in unicodedata.normalize("NFD", t.lower()) if unicodedata.category(c) != "Mn")
-
-
-def mesmo_nome(pedido, lido):
-    """tolera um erro de leitura do Gemini ("Miopure" = "Micpure")"""
-    a = _norm(pedido)
-    return any(a in w or difflib.SequenceMatcher(None, a, w).ratio() >= 0.75 for w in _norm(lido).split())
 
 
 def nomes_gemini(f, caixas):
