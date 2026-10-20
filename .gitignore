@@ -5,3 +5,4 @@ __pycache__/
 # segredos: a chave do Gemini fica no .env do only-vision, nunca aqui
 .env
 *.env
+.venv/

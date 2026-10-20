@@ -77,15 +77,21 @@ rápido depois de cada teste:
 | Z | ScaraNode v18 | TMC2209 | fuso de 8 mm/volta | fins de curso em cima e embaixo |
 | Bomba de vácuo | RP2040-Zero | relé no GP4 | — | comandada pelo REPL do MicroPython |
 
-Câmera: Logitech C920 de cima, 1920×1080, índice 1 no OpenCV.
+Câmera: Logitech C920 de cima, 1920×1080 (MJPG). No Linux o `cam.py` acha a C920 pelo nome
+(`/sys/class/video4linux`) e abre com V4L2; no Windows usa DirectShow, índice 1.
 
 ## Instalação
 
 Requer Python 3.10+ e as placas com o firmware `painel` do ScaraNode.
 
 ```bash
-pip install -r requirements.txt
+uv sync                    # ambiente + dependências (pyproject.toml)
+uv sync --extra nomes      # + Gemini, para --nome / --ordem
+uv run pytest              # testes
+# sem uv: pip install -r requirements.txt
 ```
+
+No Linux, se der "Permission denied" em `/dev/ttyACM*` ou `/dev/video*`, coloque o usuário nos grupos `dialout` e `video`.
 
 Para escolher caixas pelo nome, clone o `only-vision` **ao lado** desta pasta (`../only-vision`) e
 coloque a chave do Gemini no `.env` **dele** (`GEMINI_API_KEY=...`). Este repositório não guarda
