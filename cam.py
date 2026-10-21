@@ -5,6 +5,7 @@ NOME_CAM = "C920"
 IDX_PADRAO = 1  # Windows (DirectShow): índice da C920 com a câmera do notebook no 0
 FOCO = 0        # foco manual da C920 (0 = infinito): o autofoco caça e borra a imagem depois de um reset no USB
 SYSFS = Path("/sys/class/video4linux")
+DESCARTA_MIN = 5  # o buffer da V4L2 pode segurar ~4 quadros mesmo pedindo 1
 
 
 def backend(plataforma=sys.platform):
@@ -34,9 +35,11 @@ class Cam:
         self.c.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         self.c.set(cv2.CAP_PROP_FRAME_WIDTH, w); self.c.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
         self.c.set(cv2.CAP_PROP_AUTOFOCUS, 0); self.c.set(cv2.CAP_PROP_FOCUS, FOCO)
+        self.c.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # com buffer cheio o driver guarda os quadros velhos
         for _ in range(10): self.c.read()
     def foto(self, arq=None, descarta=5):
-        for _ in range(descarta): self.c.read()
+        """quadro atual; `descarta` esvazia o buffer (quadros de antes de um movimento)"""
+        for _ in range(max(descarta, DESCARTA_MIN)): self.c.grab()
         r, f = self.c.read()
         if arq and r: cv2.imwrite(arq, f)
         return f
