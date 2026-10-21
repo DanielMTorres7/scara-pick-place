@@ -12,7 +12,7 @@ import numpy as np
 
 from cam import Cam
 from ponta import acha_ponta, ponta_precisa
-from scara import EIXOS, MovimentoAbortado, Scara, Z_CHAVE
+from scara import EIXOS, SUAVE, MovimentoAbortado, Scara, Z_CHAVE
 
 RED = {"j1": 14, "j2": 12}       # redução das juntas
 PASSO_Z = 8.0                    # mm por volta do fuso
@@ -43,7 +43,9 @@ def acel(v, delta):
 # medido em 2026-10-20 (demo.py teste, 5 ciclos, perda < 0,5° / 0,1 mm): rpm no motor e °/s² (Z: só rpm).
 # J2 sozinho aguenta 500 °/s², mas a reação arrasta o J1 (-0,85° em 5 ciclos). Com as duas juntas juntas
 # (show, 3 voltas): 150/300 °/s² perdeu 3,45° no J1; 100/200 °/s² perdeu 0,44°.
-LIMITES = {"j1": (300, 100.0), "j2": (400, 200.0), "z": (500, None)}
+# Com curva S 0,5, correia do J1 tensionada e TMC a 1,35 A: J1 sozinho 250 °/s², J2 200 (300 arrasta o J1 -1,4°),
+# Z 600 rpm (700 perde). Combinado no show: abaixo.
+LIMITES = {"j1": (400, 200.0), "j2": (400, 150.0), "z": (600, None)}
 
 
 def limita(eixo, rpm, curso):
@@ -93,7 +95,7 @@ def ponta_mediana(fs, esperado=None):
 
 
 class Demo:
-    def __init__(self, acel_fator=1.0, suave=0.0):
+    def __init__(self, acel_fator=1.0, suave=SUAVE):
         self.acel_fator, self.suave = acel_fator, suave
         self.r = Scara(); self.c = Cam()
         for p in ("braco", "z"):
@@ -236,7 +238,7 @@ if __name__ == "__main__":
     ap.add_argument("--degraus", default=",".join(map(str, DEGRAUS)), help="teste: rpm de cada degrau")
     ap.add_argument("--acel-fator", type=float, default=1.0, help="multiplica a aceleração das juntas")
     ap.add_argument("--acels", default="", help="teste: acelerações (°/s²) na rpm de --degraus[0]")
-    ap.add_argument("--suave", type=float, default=0.0, help="curva S: 0 = trapézio, 1 = S completa")
+    ap.add_argument("--suave", type=float, default=SUAVE, help="curva S: 0 = trapézio, 1 = S completa")
     a = ap.parse_args()
     d = Demo(a.acel_fator, a.suave)
     try:

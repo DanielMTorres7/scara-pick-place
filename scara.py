@@ -31,7 +31,8 @@ VEL_JUNTAS = {"j1": 900 / 60 * 360 / 14, "j2": 900 / 60 * 360 / 12}   # 900 rpm 
 VEL_PONTA = 3000.0  # mm/s: teto da velocidade da ponta (cartesiana)
 L1, L2, O2 = 300.0, 200.0, -22.53   # braço (mm) e zero do J2 (calibracao_braco.json)
 ACEL_JUNTAS = {"j1": 60.0, "j2": 60.0}   # °/s²: reduzida depois da bomba montada no antebraço (antes 120 testado sem bomba)
-SUAVE = 0.0        # curva S: fração da rampa com aceleração variando (0 = trapézio, 1 = S completa)
+SUAVE = 0.5        # curva S: fração da rampa com aceleração variando (0 = trapézio, 1 = S completa). 0,5 deixou o J1
+                   # aguentar 250 °/s² de pico (trapézio: 150) com o mesmo tempo de movimento ou menos
 DT = 0.01          # s por segmento (igual ao painel)
 FREQ = 10_000_000  # relógio do gerador de passos da placa
 TJ_DMIN = 50
