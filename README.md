@@ -94,7 +94,7 @@ uv run pytest              # testes
 No Linux, se der "Permission denied" em `/dev/ttyACM*` ou `/dev/video*`, coloque o usuário nos grupos `dialout` e `video`.
 
 Para escolher caixas pelo nome, clone o `only-vision` **ao lado** desta pasta (`../only-vision`) e
-coloque a chave do Gemini no `.env` **dele** (`GEMINI_API_KEY=...`). Este repositório não guarda
+coloque a chave do Gemini (`GEMINI_API_KEY=...`) no `.env` dele ou no `.env` desta pasta. Este repositório não guarda
 nenhuma chave.
 
 ```

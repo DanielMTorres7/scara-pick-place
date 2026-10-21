@@ -37,3 +37,30 @@ def test_detectar_antigo_devolve_par(monkeypatch):
     caixas = [{"centro": (500.0, 500.0)}]
     pick_place.nomes_gemini(np.zeros((1000, 2000, 3), np.uint8), caixas)
     assert caixas[0]["nome"] == "Micpure"
+
+
+def test_chave_no_env_do_braco(monkeypatch, tmp_path):
+    """GEMINI_API_KEY no .env do braço vale quando o only-vision não tem .env"""
+    import os
+    visao = tmp_path / "only-vision"
+    visao.mkdir()
+    (tmp_path / "braco.env").write_text("GEMINI_API_KEY=chave-de-teste\n")
+    monkeypatch.setattr(pick_place, "VISAO", visao)
+    monkeypatch.setattr(pick_place, "ENV_BRACO", tmp_path / "braco.env")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    vistas = []
+    vr = types.ModuleType("vision_remedios")
+    vr.os = os
+
+    class AnalisadorGemini:
+        def __init__(self, modelo):
+            vistas.append(os.getenv("GEMINI_API_KEY"))
+            self.modelo = modelo
+
+        def detectar(self, frame):
+            return []
+
+    vr.AnalisadorGemini = AnalisadorGemini
+    monkeypatch.setitem(sys.modules, "vision_remedios", vr)
+    pick_place.nomes_gemini(np.zeros((10, 10, 3), np.uint8), [])
+    assert vistas == ["chave-de-teste"]

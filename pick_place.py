@@ -61,6 +61,7 @@ def obstaculo_mm(m, cantos_px, altura):
 
 
 VISAO = Path(__file__).resolve().parent.parent / "only-vision"
+ENV_BRACO = Path(__file__).resolve().parent / ".env"   # a GEMINI_API_KEY pode ficar aqui ou no .env do only-vision
 
 
 def nomes_gemini(f, caixas):
@@ -68,6 +69,7 @@ def nomes_gemini(f, caixas):
     sys.path.insert(0, str(VISAO))
     from dotenv import load_dotenv
     load_dotenv(VISAO / ".env")
+    load_dotenv(ENV_BRACO)
     import vision_remedios as vr
     g = vr.AnalisadorGemini(vr.os.getenv("GEMINI_MODEL", "gemini-robotics-er-2-preview"))
     t = time.time()
