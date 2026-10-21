@@ -71,7 +71,9 @@ def nomes_gemini(f, caixas):
     import vision_remedios as vr
     g = vr.AnalisadorGemini(vr.os.getenv("GEMINI_MODEL", "gemini-robotics-er-2-preview"))
     t = time.time()
-    lidas, _ = g.detectar(f)
+    lidas = g.detectar(f)
+    if isinstance(lidas, tuple):          # versões antigas do only-vision devolviam (caixas, extra)
+        lidas = lidas[0]
     h, w = f.shape[:2]
     print("Gemini (%s, %.0f s): %d caixas lidas (as de dentro da coletora são ignoradas)" % (g.modelo, time.time() - t, len(lidas)))
     for k in caixas:
