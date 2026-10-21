@@ -38,6 +38,21 @@ PAUSA_VENTOSA = 0.5
 RELE_REPOUSO, RELE_PEGA = 0, 1
 
 
+class ColetoraForaDoAlcance(RuntimeError):
+    """nenhum ponto da boca da coletora é alcançável: é a coletora que está mal posicionada, não falta remédio"""
+
+
+def pontos_alcancaveis(m, solta):
+    """pontos de soltura (mm) que o braço alcança dentro dos limites das juntas"""
+    ok = [p for p in solta if m.ik_todas(*p)]
+    if not ok:
+        cx, cy = np.mean(solta, axis=0)
+        raise ColetoraForaDoAlcance(
+            "coletora fora do alcance do braço: a boca está a %.0f mm do eixo do J1 (o braço alcança de ~220 a "
+            "500 mm); mude a coletora de lugar" % math.hypot(cx, cy))
+    return ok
+
+
 def acha_coletora(f):
     """caixa de MDF (cor de madeira): maior região cor de madeira -> retângulo e polígono (px)"""
     hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
@@ -180,7 +195,8 @@ class PickPlace:
         for p in r.placas.values():
             p.eventos.clear()
         f = self.c.foto("fotos/pp_mesa.jpg")
-        col, caixas, self._solta, (cx, cy, comp) = self.planejar(f)
+        col, caixas, solta, (cx, cy, comp) = self.planejar(f)
+        self._solta = pontos_alcancaveis(m, solta)
         if self.com_nomes:
             nomes_gemini(f, caixas)
             for k in caixas:
@@ -208,9 +224,9 @@ class PickPlace:
         pos = r.posicoes()
         try:
             cmd = m.ik(x, y, ref=(pos["j1"], pos["j2"]), livre=self.livre)
-            cmd_solta = m.ik(*self._solta[i % len(self._solta)], ref=cmd)
         except ValueError as ex:
             raise CaixaInalcancavel("px (%.0f, %.0f): %s" % (u_, v_, ex)) from ex
+        cmd_solta = m.ik(*self._solta[i % len(self._solta)], ref=cmd)   # já filtrado em preparar()
         print("caixa %d %s: px (%.0f, %.0f) -> (%.1f, %.1f) mm, juntas (%.1f, %.1f)" % (i + 1, k.get("nome", ""), u_, v_, x, y, *cmd))
         t = time.time()
         r.ir_juntas(*cmd)                 # no alto, por cima de tudo
