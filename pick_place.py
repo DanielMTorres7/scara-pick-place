@@ -33,8 +33,9 @@ Z_PEGA = -97.0            # o fim de curso de baixo aciona em ~-98,3 (ventosa ~7
 PARQUE = (20.0, -110.0)   # braço recolhido, fora da área das caixas, para a foto
 LARGURA_BRACO = 50.0      # mm de folga entre o braço (baixo) e a coletora
 PAUSA_VENTOSA = 0.5
-# relé da bomba: ligado = ventosa fechada (estado de partida); desliga para pegar, liga de novo para soltar
-RELE_REPOUSO, RELE_PEGA = 1, 0
+# relé da bomba (sem válvula): 1 liga a bomba e a ventosa puxa, 0 desliga. Em repouso fica desligada;
+# liga ao descer para pegar e desliga em cima da coletora para soltar a caixa.
+RELE_REPOUSO, RELE_PEGA = 0, 1
 
 
 def acha_coletora(f):
@@ -97,6 +98,11 @@ class PickPlace:
         self._solta = []
 
     def fechar(self):
+        """sempre deixa a bomba desligada (o pino mantém o estado depois que a porta fecha), mesmo após erro"""
+        try:
+            self.bomba.rele(RELE_REPOUSO)
+        except Exception as ex:
+            print("bomba: não foi possível desligar o relé (%s)" % ex)
         self.c.fechar()
         self.r.fechar()
         self.bomba.fechar()
@@ -165,7 +171,7 @@ class PickPlace:
     def preparar(self):
         """sobe, recolhe o braço, fotografa a mesa e planeja: devolve as caixas de remédio (com "nome" se com_nomes)"""
         r, m = self.r, self.m
-        self.bomba.rele(RELE_REPOUSO)        # percurso começa com o relé ligado
+        self.bomba.rele(RELE_REPOUSO)        # percurso começa com a bomba desligada
         self.estacionar()
         for p in r.placas.values():
             p.eventos.clear()
@@ -206,13 +212,13 @@ class PickPlace:
         r.ir_juntas(*cmd)                 # no alto, por cima de tudo
         r.ir("z", Z_MIRA)
         cmd = self.mira(x, y, cmd)
-        self.bomba.rele(RELE_PEGA)        # desceu para pegar: relé troca, ventosa puxa
+        self.bomba.rele(RELE_PEGA)        # desceu para pegar: liga a bomba, ventosa puxa
         r.ir("z", Z_PEGA)
         time.sleep(PAUSA_VENTOSA)
         r.ir("z", Z_ALTO)
         r.ir_juntas(*cmd_solta)
         r.ir("z", Z_SOLTA)
-        self.bomba.rele(RELE_REPOUSO)     # em cima da coletora: relé liga de novo, a caixa cai
+        self.bomba.rele(RELE_REPOUSO)     # em cima da coletora: desliga a bomba, a caixa cai
         time.sleep(PAUSA_VENTOSA)
         r.ir("z", Z_ALTO)
         self.checar_eventos()

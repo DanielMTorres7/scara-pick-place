@@ -32,7 +32,7 @@ Este repositório reúne o código que liga as duas partes que já existiam:
    à caixa do OpenCV mais próxima. Aceita um erro de leitura (por exemplo, "Miopure" = "Micpure").
 7. **Faz o pick and place** (`pick_place.py`). Cada caixa passa por estas etapas: subir acima da
    coletora, ir até a caixa, descer até a altura de mira, conferir pela câmera e corrigir, descer e
-   pegar (o relé troca), subir, ir até a coletora, descer e soltar (o relé volta). O código também:
+   pegar (a bomba liga), subir, ir até a coletora, descer e soltar (a bomba desliga; em repouso ela fica desligada). O código também:
    - **evita colisão**: na hora da pega, escolhe a posição do cotovelo que deixa o braço longe da
      parede da coletora;
    - **para tudo** se uma placa avisar de reinício do TMC, queda do 24 V ou fim de curso acionado
