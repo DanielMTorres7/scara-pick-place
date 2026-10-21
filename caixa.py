@@ -25,9 +25,12 @@ def _sementes(f, roi):
     for c in cs:
         a = cv2.contourArea(c)
         (cx, cy), (w, h), ang = cv2.minAreaRect(c)
-        if a < 4000 or a / (w * h) < 0.75 or not (90 < max(w, h) < 220 and 55 < min(w, h) < 160):
+        preench = a / (w * h)
+        if a < 4000 or preench < 0.75 or not (80 < max(w, h) < 220 and 55 < min(w, h) < 160):
             continue
-        if max(w, h) / min(w, h) < 1.25:                 # impressão é retangular (~1,5:1); o hexágono do braço não
+        # o hexágono azul do braço é quase redondo (~1,15:1) e preenche ~75% do retângulo; a impressão da caixa
+        # é retangular (~1,5:1) ou, quando quase quadrada (Levoxin ~1,17:1), preenche ~90%
+        if max(w, h) / min(w, h) < 1.25 and preench < 0.85:
             continue
         x, y, bw, bh = cv2.boundingRect(c)
         if x <= 2 or y <= 2 or x + bw >= f.shape[1] - 2 or y + bh >= f.shape[0] - 2:
