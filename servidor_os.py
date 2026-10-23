@@ -160,6 +160,7 @@ def main():
     ap.add_argument("--porta", type=int, default=8770)
     args = ap.parse_args()
 
+    from braco_persistente import BracoPersistente
     from job_os import JobOS
     from pick_place import PickPlace
     from progresso import Progresso
@@ -169,8 +170,10 @@ def main():
     progresso = Progresso(pasta / "os_progresso.json")
     conexao = Conexao(pasta / "braco_conexao.json")
 
+    braco = BracoPersistente(PickPlace)    # só a primeira OS abre e referencia; as seguintes vão direto
+
     def novo_job(pedido):
-        return JobOS(pedido, lambda: PickPlace(com_nomes=bool(pedido["itens"])),
+        return JobOS(pedido, lambda: braco.executor(com_nomes=bool(pedido["itens"])),
                      Sistema(callback_de(conexao.emr_url, pedido["os"]), conexao.token), progresso)
 
     srv = cria_servidor(args.porta, conexao, novo_job)
@@ -180,6 +183,8 @@ def main():
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        braco.encerrar()
 
 
 if __name__ == "__main__":

@@ -9,3 +9,5 @@ __pycache__/
 .superpowers/
 os_progresso.json
 braco_conexao.json
+# logs de execução (servidor de OS)
+*.log

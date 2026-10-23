@@ -52,6 +52,7 @@ def ajustar(dados):
 
 if __name__ == "__main__":
     import sys
+    # uso: python calibrar.py [dados_grade.json] [calibracao_braco.json]
     cal, err, d = ajustar(json.load(open(sys.argv[1] if len(sys.argv) > 1 else "dados_grade.json")))
     for x, e in zip(d, err):
         print(x["j1"], x["j2"], x["z"], x["px"], "erro %.1f px" % e)
@@ -60,4 +61,4 @@ if __name__ == "__main__":
     P = np.array(cal["P"])
     # centro da câmera no referencial do robô
     C = -np.linalg.solve(P[:, :3], P[:, 3]); print("centro da câmera (x,y,z) mm:", np.round(C, 1))
-    json.dump(cal, open("calibracao_braco.json", "w"), indent=1)
+    json.dump(cal, open(sys.argv[2] if len(sys.argv) > 2 else "calibracao_braco.json", "w"), indent=1)

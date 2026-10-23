@@ -2,11 +2,12 @@
 import cv2, numpy as np
 
 CENTRO_J1 = (1113.0, 690.0)   # eixo do J1 na imagem (medido girando o J1)
+FAIXA = ((106, 80, 35), (118, 255, 220))   # HSV do azul do hexágono (mín, máx); H >= 106 separa a mangueira da ventosa (H ~101); V até 220 aceita o reflexo da mesa fechada; H até 118 deixa de fora a mesa roxa (H ~118-130) no lugar novo (23/10)
 BRILHO_CENTRO = 70            # centro do hexágono: ponta (engate branco) ~110, cotovelo (motor) ~30
 
-def hexagonos(f):
+def hexagonos(f, faixa=FAIXA):
     hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
-    m = cv2.inRange(hsv, np.array((105, 110, 35)), np.array((130, 255, 125)))
+    m = cv2.inRange(hsv, np.array(faixa[0]), np.array(faixa[1]))
     m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
     m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25)))
     cs, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -22,9 +23,9 @@ def hexagonos(f):
         out.append({"c": (M["m10"] / M["m00"], M["m01"] / M["m00"]), "area": a, "r": r, "circ": circ, "hull": h})
     return out, m
 
-def acha_ponta(f, centro=CENTRO_J1, perto=None):
+def acha_ponta(f, centro=CENTRO_J1, perto=None, faixa=FAIXA):
     """hexágono da ponta; com `perto` (pixel previsto), o candidato mais próximo dele, senão o de centro mais claro"""
-    hs, _ = hexagonos(f)
+    hs, _ = hexagonos(f, faixa)
     # ponta: hexágono com o rolamento e o engate branco (centro claro); o cotovelo tem o motor (centro escuro)
     g = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
     cand = []
@@ -68,11 +69,11 @@ def _anel(f, cx, cy, raio_busca=70):
     return float(x + x0), float(y + y0)
 
 
-def ponta_precisa(f, esperado=None):
+def ponta_precisa(f, esperado=None, faixa=FAIXA):
     """centro do anel do rolamento (Hough) dentro do hexágono da ponta; cai no centro do hexágono se não achar.
     Com `esperado` (pixel previsto pelo modelo): se o hexágono não aparecer ali (ex.: azul da caixa embaixo),
     procura o anel do rolamento em volta do ponto previsto."""
-    p = acha_ponta(f, perto=esperado)
+    p = acha_ponta(f, perto=esperado, faixa=faixa)
     if esperado is not None and (p is None or np.hypot(p["c"][0] - esperado[0], p["c"][1] - esperado[1]) > 60):
         return _anel(f, int(esperado[0]), int(esperado[1]), 60)
     if p is None:

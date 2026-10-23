@@ -9,11 +9,15 @@ import numpy as np
 
 MARGEM = 45     # px que a borda da caixa pode estar além da impressão
 TAM_LONGO, TAM_CURTO = 185, 125   # px: maior tampa de caixa vista até agora (+~10%)
+RAIO_BRACO_PX = 150   # semente a menos disso de um hexágono previsto do braço é o braço (paralaxe do cotovelo)
+ROXO = (116, 165)  # matiz (OpenCV 0-179) do tampo roxo; azul da impressão ~100-110, vermelho ~175
 
 
-def _sementes(f, roi):
+def _sementes(f, roi, braco_px=None):
     hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
-    m = ((hsv[..., 1] > 45) & (hsv[..., 2] > 60)).astype(np.uint8) * 255
+    h = hsv[..., 0]
+    roxo = (h >= ROXO[0]) & (h <= ROXO[1])          # tampo da mesa: saturado, mas roxo (a impressão é azul/vermelha)
+    m = ((hsv[..., 1] > 45) & (hsv[..., 2] > 60) & ~roxo).astype(np.uint8) * 255
     if roi:
         x0, y0, x1, y1 = roi
         r = np.zeros_like(m); r[y0:y1, x0:x1] = 255; m &= r
@@ -28,9 +32,13 @@ def _sementes(f, roi):
         preench = a / (w * h)
         if a < 4000 or preench < 0.75 or not (80 < max(w, h) < 220 and 55 < min(w, h) < 160):
             continue
+        if braco_px is not None:
+            # posição dos hexágonos do braço conhecida (cotovelo e ponta na foto): descarta só o que está perto
+            if any(np.hypot(cx - u, cy - v) < RAIO_BRACO_PX for u, v in braco_px):
+                continue
         # o hexágono azul do braço é quase redondo (~1,15:1) e preenche ~75% do retângulo; a impressão da caixa
-        # é retangular (~1,5:1) ou, quando quase quadrada (Levoxin ~1,17:1), preenche ~90%
-        if max(w, h) / min(w, h) < 1.25 and preench < 0.85:
+        # é retangular (~1,5:1) ou, quando quase quadrada (Levoxin ~1,17:1; degradê azul na C920), preenche 80-90%
+        elif max(w, h) / min(w, h) < 1.25 and preench < 0.80:
             continue
         x, y, bw, bh = cv2.boundingRect(c)
         if x <= 2 or y <= 2 or x + bw >= f.shape[1] - 2 or y + bh >= f.shape[0] - 2:
@@ -83,9 +91,10 @@ def caixa_inteira(g, semente):
             "impressao": (cx, cy)}
 
 
-def acha_caixas(f, roi=None):
+def acha_caixas(f, roi=None, braco_px=None):
+    """braco_px: pixels previstos dos hexágonos do braço (cotovelo, ponta); sem eles, a forma é que os separa"""
     g = cv2.GaussianBlur(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY), (3, 3), 0).astype(np.float32)
-    return [caixa_inteira(g, s) for s in _sementes(f, roi)]
+    return [caixa_inteira(g, s) for s in _sementes(f, roi, braco_px)]
 
 
 if __name__ == "__main__":

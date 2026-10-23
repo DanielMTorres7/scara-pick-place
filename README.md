@@ -75,7 +75,7 @@ rápido depois de cada teste:
 | J1 (base, 360°) | ScaraNode v18 | DM556 + NEMA 23 | 14:1 | **sem fim de curso**: o zero é o da hora em que a placa ligou |
 | J2 (cotovelo) | a mesma placa (modo "dois") | TMC2209 | 12:1 | limitado a -112° (colisão com a coluna) |
 | Z | ScaraNode v18 | TMC2209 | fuso de 8 mm/volta | fins de curso em cima e embaixo |
-| Bomba de vácuo | RP2040-Zero | relé no GP4 | — | comandada pelo REPL do MicroPython |
+| Módulo de 8 relés | RP2040-Zero b02d1c | ativo baixo, NA: GP4 potência, GP5 bomba, GP8 placa 2 (Z), GP10 placa 1 (braço), GP11 DM556; GP9 com defeito; GP0 lê o 24 V | — | `firmware_reles/`, comandado pelo REPL; no boot tudo desliga, o `Scara` energiza ao abrir e corta ao fechar |
 
 Câmera: Logitech C920 de cima, 1920×1080 (MJPG). No Linux o `cam.py` acha a C920 pelo nome
 (`/sys/class/video4linux`) e abre com V4L2; no Windows usa DirectShow, índice 1.
@@ -112,7 +112,7 @@ python pick_place.py --ordem arpadol,micpure      # todas da lista, nessa ordem
 python pick_place.py --nome micpure --alvo-px 718,1105   # caixa indicada à mão (ex.: cortada na borda da imagem)
 
 python diagnostico.py --corrigir   # re-zera J1/J2 pela câmera e o Z pelo fim de curso (depois de bater, perder passo...)
-python bomba.py liga|desliga|firmware
+python reles.py estado|liga <nome>|desliga <nome>|energiza|desenergiza|gravar
 python ir_caixa.py                 # só leva a ventosa ao centro de uma caixa e confere
 python calibrar.py                 # refaz o ajuste a partir de dados_grade.json
 ```
@@ -159,7 +159,7 @@ Rode o servidor de dentro desta pasta (as fotos vão para `fotos/`).
 | `caixa.py` | detecção das caixas de remédio (OpenCV) |
 | `pick_place.py` | ciclo completo, caixa coletora, colisão, nomes pelo Gemini, relé |
 | `diagnostico.py` | mede pela câmera quanto J1/J2 saíram do modelo e corrige |
-| `bomba.py` | relé da bomba de vácuo |
+| `reles.py` | módulo de relés (energia, bomba); `firmware_reles/` é o firmware da placa |
 | `servidor_os.py` | recebe a OS do EMR (HTTP) e roda o job |
 | `job_os.py` | executa a OS: pausa, faltando, cancelamento, erro, aviso ao sistema |
 | `selecao.py`, `progresso.py`, `sistema.py`, `conexao.py` | escolha das caixas, progresso salvo, cliente do EMR, conexão feita pela tela do sistema |

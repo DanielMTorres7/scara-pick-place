@@ -12,10 +12,9 @@ import numpy as np
 AQUI = os.path.dirname(os.path.abspath(__file__))
 
 # Alturas (mm). A ventosa encosta na mesa com o Z em Z_TOQUE_MESA (medido com régua).
-Z_TOQUE_MESA = -135.0
-# topo do rolamento (o que a câmera vê) acima da boca da ventosa. Estimado pelo "quase no centro"; AJUSTAR com o
-# tabuleiro ou régua
-MARCADOR_ACIMA_VENTOSA = 20.0
+Z_TOQUE_MESA = -114.0   # medido: a ventosa encosta numa caixa de 30 mm em -84 (mesa erguida 6 mm em 2026-10-23)
+# topo do hexágono azul do rolamento (o que a câmera vê) acima da boca da ventosa (medido com régua em 2026-10-23)
+MARCADOR_ACIMA_VENTOSA = 94.0
 ALTURA_CAIXA = 30.0
 
 
@@ -52,7 +51,7 @@ class Modelo:
         b = math.radians(j1 + j2 + self.o2)
         return self.L1 * math.cos(a) + self.L2 * math.cos(b), self.L1 * math.sin(a) + self.L2 * math.sin(b)
 
-    def ik_todas(self, x, y, lim1=(-130, 130), lim2=(-112, 135)):
+    def ik_todas(self, x, y, lim1=(-130, 130), lim2=(-128, 128)):
         """todas as soluções (j1, j2) dentro dos limites para a ponta em (x, y)"""
         r2 = x * x + y * y
         c2 = (r2 - self.L1 ** 2 - self.L2 ** 2) / (2 * self.L1 * self.L2)
@@ -70,7 +69,7 @@ class Modelo:
                     sols.append((j1, j2))
         return sols
 
-    def ik(self, x, y, ref=None, lim1=(-130, 130), lim2=(-112, 135), livre=None):
+    def ik(self, x, y, ref=None, lim1=(-130, 130), lim2=(-128, 128), livre=None):
         """ângulos (j1, j2) para a ponta em (x, y): a solução dentro dos limites mais perto de `ref`;
         com `livre(j1, j2) -> bool`, só as soluções em que o braço não bate em nada"""
         sols = self.ik_todas(x, y, lim1, lim2)

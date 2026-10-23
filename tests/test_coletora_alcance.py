@@ -11,10 +11,10 @@ def m():
 
 
 def test_filtra_pontos_perto_demais_da_base(m):
-    longe, perto = (0.0, 350.0), (0.0, 150.0)       # 150 mm do eixo: o J2 não dobra tanto (limite -112°)
+    longe, perto = (0.0, 350.0), (0.0, 150.0)       # 150 mm do eixo: o J2 não dobra tanto (limite ±128°, raio mínimo ~163 mm)
     assert pontos_alcancaveis(m, [perto, longe]) == [longe]
 
 
 def test_nenhum_ponto_alcancavel_e_erro_claro(m):
     with pytest.raises(ColetoraForaDoAlcance, match="coletora"):
-        pontos_alcancaveis(m, [(-47.0, -173.0), (0.0, 600.0)])
+        pontos_alcancaveis(m, [(-30.0, -110.0), (0.0, 600.0)])   # 114 mm: dentro do raio mínimo
