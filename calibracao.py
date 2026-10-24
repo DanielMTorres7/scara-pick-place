@@ -66,7 +66,7 @@ def recalibrar_cameras(pp):
     poses = grade.poses_visiveis(poses, [c["prev"] for c in specs], Z_GRADE)
     grade.coletar(grade.sequencia(poses, Z_GRADE), specs, FATOR_GRADE, r=r, abertas=[pp.cams[c["nome"]] for c in specs])
     carimbo = datetime.now().strftime("%Y%m%d-%H%M")
-    resumo = []
+    resumo, copias = [], []
     for nome, arq, _ in CAMERAS:
         dados = [x for x in json.load(open(AQUI / ("dados_grade_auto_%s.json" % nome))) if x["px"]]
         if len(dados) < MIN_PONTOS:
@@ -75,14 +75,21 @@ def recalibrar_cameras(pp):
         cal, err, _ = calibrar.ajustar(dados)
         antigo, novo = _erro_mediano(Modelo(arq), dados), float(np.median(err))
         if vale_aplicar(antigo, novo, len(dados)):
-            aplica_modelo(cal, arq, carimbo)
+            copias.append((aplica_modelo(cal, arq, carimbo), arq))
             resumo.append("%s: %.1f -> %.1f px (aplicado)" % (nome, antigo, novo))
         else:
             resumo.append("%s: %.1f -> %.1f px (mantido o atual)" % (nome, antigo, novo))
     pp.ms = modelos()
     pp.m = pp.ms[CAMERAS[0][0]]
     pp._homing_feito = False
-    pp.referenciar()                             # homing com o modelo novo: J1 no 0 corrigido
+    try:
+        pp.referenciar()                         # homing com o modelo novo: J1 no 0 corrigido
+    except Exception:
+        for copia, arq in copias:                # o modelo novo não confirmou o J1: volta o antigo
+            shutil.copyfile(copia, arq)
+        pp.ms = modelos()
+        pp.m = pp.ms[CAMERAS[0][0]]
+        raise
     return "; ".join(resumo)
 
 
@@ -106,8 +113,11 @@ class Calibracao:
         t0 = time.time()
         try:
             if self.tarefa == "soltar":
-                self.braco.encerrar()
+                self.braco.soltar()
                 return self._fim(True, "motores soltos: alinhe o J1 reto (0°) à mão e inicie a recalibração")
+            if self.tarefa == "cameras" and not self.braco.solto:
+                # sem o soltar, J1 = 0 seria onde o braço estiver e a grade passaria dos limites do J1
+                return self._fim(False, "recalibrar câmeras exige soltar os motores e alinhar o J1 à mão antes")
             ex = self.braco.executor(com_nomes=False)
             try:
                 if self.tarefa == "braco":

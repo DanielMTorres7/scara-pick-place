@@ -38,9 +38,13 @@ class _Executor:
 class BracoPersistente:
     def __init__(self, fabrica):
         self._fabrica, self._pp, self._trava = fabrica, None, threading.Lock()
+        # motores soltos pelo botão "soltar" e nada abriu o braço depois: só então o operador pode ter alinhado o J1
+        # à mão, e a recalibração das câmeras (J1 = 0 onde está) é segura
+        self.solto = False
 
     def executor(self, com_nomes):
         with self._trava:
+            self.solto = False
             if self._pp is None:
                 self._pp = self._fabrica()
             self._pp.com_nomes = com_nomes
@@ -51,6 +55,11 @@ class BracoPersistente:
             if self._pp is pp:
                 self._pp = None
         pp.fechar()
+
+    def soltar(self):
+        """fecha o braço (energia cortada) para o operador alinhar o J1 à mão"""
+        self.encerrar()
+        self.solto = True
 
     def encerrar(self):
         """servidor saindo: fecha o braço aberto (bomba, câmeras, energia)"""

@@ -69,3 +69,14 @@ def test_executor_expoe_o_pickplace():
     b = _braco(log)
     ex = b.executor(True)
     assert isinstance(ex.pickplace, PPFalso)
+
+
+def test_solto_so_depois_de_soltar_e_sem_abrir_de_novo():
+    """recalibrar câmeras assume o J1 alinhado à mão com os motores soltos: só vale logo depois do soltar"""
+    log = []
+    b = _braco(log)
+    assert not b.solto                               # servidor recém-aberto: ninguém alinhou nada
+    b.soltar()
+    assert b.solto
+    b.executor(True)                                 # uma OS (ou referenciar) abriu e mexeu no braço
+    assert not b.solto
