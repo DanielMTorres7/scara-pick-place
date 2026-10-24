@@ -13,6 +13,7 @@ from selecao import escolhe_caixas, pendentes
 from sistema import SistemaIndisponivel
 
 FIM = ("cancelled", "completed")
+MAX_FOTOS_TODAS = 10    # modo "todas": uma caixa que nunca sai da mesa (pega falhando) não prende o braço em laço
 
 
 class CaixaInalcancavel(ValueError):
@@ -31,6 +32,10 @@ class JobOS:
         self.quantidade = pedido["quantidade"]
         self.feitos = {}
         self.encerrando = False     # decidiu sair (cancelada/concluída/erro): o servidor espera e aceita outra OS
+        # "todas" (botão "separar tudo" do sistema): sem lista nem quantidade, pega o que detectar até a mesa esvaziar
+        self.todas = bool(pedido.get("todas"))
+        self._mesa_vazia = False
+        self._fotos = 0
 
     @property
     def os(self):
@@ -40,6 +45,8 @@ class JobOS:
         return sum(self.feitos.values())
 
     def _pendentes(self):
+        if self.todas:                 # qualquer caixa, enquanto a última foto ainda deu alguma para pegar
+            return [] if self._mesa_vazia else [{"nome": "", "faltam": 10 ** 6}]
         return pendentes(self.itens, self.quantidade, self.feitos)
 
     def _evento(self, tipo, **extra):
@@ -95,6 +102,9 @@ class JobOS:
             if est != "running":
                 break
         ex.estacionar()
+        if self.todas:
+            self._fotos += 1
+            self._mesa_vazia = i == 0 or self._fotos >= MAX_FOTOS_TODAS
         return est
 
     def rodar(self):
@@ -111,6 +121,8 @@ class JobOS:
                 est = self._ciclo(ex) if self._pendentes() else "running"
                 if est == "running":
                     pend = self._pendentes()
+                    if self.todas and pend:
+                        continue                # "separar tudo": a mesa ainda tinha caixas, foto de novo
                     if not pend:
                         est = self._evento("concluida")
                         if est != "indisponivel":

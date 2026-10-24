@@ -117,10 +117,13 @@ def test_job_terminado_aceita_nova(srv):
 
 def test_saude(srv):
     url, jobs = srv
-    assert _req(url + "/saude", metodo="GET") == (200, {"ocupado": False, "os": None, "conectado": True})
+    # spec 03-calibracao: /saude ganhou tarefa e calibracao; os campos antigos seguem iguais
+    assert _req(url + "/saude", metodo="GET") == (200, {"ocupado": False, "os": None, "conectado": True,
+                                                        "tarefa": None, "calibracao": None})
     _req(url + "/os", PEDIDO)
     jobs[0].rodou.wait(2)
-    assert _req(url + "/saude", metodo="GET") == (200, {"ocupado": True, "os": "OS-1", "conectado": True})
+    assert _req(url + "/saude", metodo="GET") == (200, {"ocupado": True, "os": "OS-1", "conectado": True,
+                                                        "tarefa": "os", "calibracao": None})
 
 
 @pytest.mark.parametrize("ruim", [
@@ -244,3 +247,108 @@ def test_conectar_recusa_pedido_de_navegador(srv, conexao):
     assert _conectar_cru(url, {"Content-Type": "application/json", "Host": "evil.com:" + porta}) == 403
     assert conexao.token == TOKEN
     assert _conectar_cru(url, {"Content-Type": "application/json"}) == 200
+
+
+def test_sigterm_e_sigint_encerram_limpo(monkeypatch):
+    """23/10: subido em segundo plano o processo herda o SIGINT ignorado e o SIGTERM o matava sem o finally:
+    o braço ficava energizado. Os dois viram KeyboardInterrupt (o main fecha o braço e corta a energia)."""
+    import signal
+
+    import pytest
+
+    import servidor_os
+    instalados = {}
+    monkeypatch.setattr(servidor_os.signal, "signal", lambda s, h: instalados.__setitem__(s, h))
+    servidor_os.instala_sinais()
+    for s in (signal.SIGTERM, signal.SIGINT):
+        with pytest.raises(KeyboardInterrupt):
+            instalados[s](s, None)
+
+
+class CalibFalsa:
+    os = None
+
+    def __init__(self, tipo):
+        if tipo not in ("soltar", "braco", "cameras"):
+            raise ValueError("tipo")
+        self.tarefa, self.encerrando, self.resultado = tipo, False, None
+        self.libera = threading.Event()
+
+    def rodar(self):
+        self.libera.wait(5)
+        self.resultado = {"tipo": self.tarefa, "ok": True, "msg": "braço referenciado", "fim": "2026-10-23T17:00:00"}
+        self.encerrando = True
+
+
+@pytest.fixture
+def srv_calib(conexao):
+    jobs, calibs = [], []
+
+    def novo_job(pedido):
+        jobs.append(JobFalso(pedido))
+        return jobs[-1]
+
+    def nova_calibracao(tipo):
+        calibs.append(CalibFalsa(tipo))
+        return calibs[-1]
+
+    s = cria_servidor(0, conexao, novo_job, nova_calibracao)
+    threading.Thread(target=s.serve_forever, daemon=True).start()
+    yield "http://127.0.0.1:%d" % s.server_address[1], jobs, calibs
+    for j in jobs + calibs:
+        j.libera.set()
+    s.shutdown()
+
+
+def _saude(url):
+    with urllib.request.urlopen(url + "/saude", timeout=5) as r:
+        return json.loads(r.read())
+
+
+def test_calibrar_roda_e_aparece_no_saude(srv_calib):
+    """botões do sistema (spec 03-calibracao): POST /calibrar {tipo} com o token; /saude mostra a tarefa e o resultado"""
+    import time
+    url, _, calibs = srv_calib
+    assert _req(url + "/calibrar", {"tipo": "braco"}) == (202, {"aceito": True, "tipo": "braco"})
+    s = _saude(url)
+    assert s["ocupado"] and s["tarefa"] == "braco" and s["os"] is None and s["calibracao"] is None
+    calibs[0].libera.set()
+    for _ in range(50):
+        s = _saude(url)
+        if not s["ocupado"]:
+            break
+        time.sleep(0.02)
+    assert s["tarefa"] is None and s["calibracao"]["ok"] and s["calibracao"]["msg"] == "braço referenciado"
+
+
+def test_calibrar_exige_token_e_tipo_valido(srv_calib):
+    url, _, calibs = srv_calib
+    assert _req(url + "/calibrar", {"tipo": "braco"}, token=None)[0] == 401
+    assert _req(url + "/calibrar", {"tipo": "tudo"})[0] == 400
+    assert _req(url + "/calibrar", ["braco"])[0] == 400
+    assert calibs == []
+
+
+def test_calibrar_com_os_rodando_409_e_os_com_calibracao_409(srv_calib):
+    url, jobs, calibs = srv_calib
+    assert _req(url + "/os", PEDIDO)[0] == 202
+    jobs[0].rodou.wait(2)
+    assert _req(url + "/calibrar", {"tipo": "braco"})[0] == 409
+    assert _saude(url)["tarefa"] == "os"
+    jobs[0].libera.set()
+    import time
+    for _ in range(50):
+        if not _saude(url)["ocupado"]:
+            break
+        time.sleep(0.02)
+    assert _req(url + "/calibrar", {"tipo": "cameras"})[0] == 202
+    assert _req(url + "/os", {**PEDIDO, "os": "OS-2"})[0] == 409
+
+
+def test_pedido_todas_ignora_lista_e_quantidade():
+    """modo "separar tudo" do sistema: {"todas": true} pega o que detectar; a lista (se vier) não vale e não lê nomes"""
+    p = valida_pedido({**PEDIDO, "todas": True})
+    assert p["todas"] is True and p["itens"] == [] and p["quantidade"] == 0
+    assert valida_pedido(PEDIDO)["todas"] is False
+    with pytest.raises(ValueError):
+        valida_pedido({**PEDIDO, "todas": "sim"})

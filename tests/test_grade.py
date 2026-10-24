@@ -36,3 +36,43 @@ def test_saida_por_camera():
 
 def test_tira_poses_com_o_braco_sobre_a_coletora():
     assert grade.poses_livres([(0, 0), (10, 0), (20, 0)], lambda j1, j2: j1 != 10) == [(0, 0), (20, 0)]
+
+
+def test_coletar_usa_o_braco_e_as_cameras_ja_abertos(tmp_path, monkeypatch):
+    """calibração pelo sistema: o servidor já tem o Scara e as câmeras abertos (braço persistente): a coleta usa esses e
+    não fecha nada no fim"""
+    import json
+
+    import grade
+
+    log = []
+
+    class R:
+        def ir(self, eixo, alvo, **k):
+            log.append(("ir", eixo, alvo))
+
+        def ir_juntas(self, j1, j2, **k):
+            log.append(("juntas", j1, j2))
+
+        def parar(self):
+            log.append("parar")
+
+        def fechar(self):
+            log.append("fechar")
+
+    class Cam:
+        def foto(self):
+            return "foto"
+
+        def fechar(self):
+            log.append("fechar cam")
+
+    monkeypatch.setattr(grade.time, "sleep", lambda s: None)
+    import ponta
+    monkeypatch.setattr(ponta, "ponta_precisa", lambda f, esperado, faixa: (esperado[0] + 3, esperado[1]))
+    saida = tmp_path / "g_C920.json"
+    cams = [{"nome": "C920", "prev": lambda j1, j2, z: (500.0, 400.0), "saida": str(saida), "dist_max": 80}]
+    grade.coletar([(0.0, 0.0, 10.0), (0.0, 0.0, -60.0)], cams, r=R(), abertas=[Cam()])
+    d = json.load(open(saida))
+    assert [x["px"] for x in d] == [[503.0, 400.0], [503.0, 400.0]]
+    assert "fechar" not in log and "fechar cam" not in log

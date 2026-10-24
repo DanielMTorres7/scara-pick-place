@@ -12,7 +12,12 @@ class _Executor:
     def __init__(self, braco, pp):
         self._braco, self._pp, self._falhou = braco, pp, False
 
-    def __getattr__(self, nome):                   # preparar, pegar, estacionar
+    @property
+    def pickplace(self):
+        """o PickPlace de verdade (para trocar atributos nele, ex.: os modelos depois de recalibrar)"""
+        return self._pp
+
+    def __getattr__(self, nome):                   # preparar, pegar, estacionar, referenciar
         return getattr(self._pp, nome)
 
     def parar(self):

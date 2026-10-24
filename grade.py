@@ -68,14 +68,18 @@ def saida_camera(saida, nome, n_cameras):
     return "%s_%s.%s" % (base, nome, ext)
 
 
-def coletar(seq, cams, fator=1.0):
-    """cams: [{"nome", "prev": (j1, j2, z) -> pixel previsto, "saida", "dist_max"}]; uma foto de cada câmera por ponto"""
-    from cam import Cam, acha_indice
+def coletar(seq, cams, fator=1.0, r=None, abertas=None):
+    """cams: [{"nome", "prev": (j1, j2, z) -> pixel previsto, "saida", "dist_max"}]; uma foto de cada câmera por ponto.
+    r/abertas: Scara e câmeras já abertos (calibração pelo servidor de OS): usa esses e não fecha no fim"""
+    import ponta
     from cameras import FAIXA_PONTA
-    from ponta import FAIXA, ponta_precisa
-    from scara import Scara
-    r = Scara(fator_vel=min(0.2 * fator, 1.0))
-    abertas = [Cam(idx=acha_indice(c["nome"])) for c in cams]
+    from ponta import FAIXA
+    dono = r is None
+    if dono:
+        from cam import Cam, acha_indice
+        from scara import Scara
+        r = Scara(fator_vel=min(0.2 * fator, 1.0))
+        abertas = [Cam(idx=acha_indice(c["nome"]), nome=c["nome"]) for c in cams]
     dados = [[] for _ in cams]
     vel = {k: v * fator for k, v in VEL.items()}; acel = {k: v * fator for k, v in ACEL.items()}
     try:
@@ -87,7 +91,7 @@ def coletar(seq, cams, fator=1.0):
             for c, cam, d in zip(cams, abertas, dados):
                 esp = c["prev"](j1, j2, z)
                 faixa = FAIXA_PONTA.get(c["nome"], FAIXA)
-                p = ponta_precisa(cam.foto(), esperado=esp, faixa=faixa) if na_imagem(esp, margem=0) else None
+                p = ponta.ponta_precisa(cam.foto(), esperado=esp, faixa=faixa) if na_imagem(esp, margem=0) else None
                 if p and math.dist(p, esp) > c["dist_max"]:
                     print("%s: descartado" % c["nome"], p, "previsto", esp)
                     p = None
@@ -97,9 +101,10 @@ def coletar(seq, cams, fator=1.0):
     except BaseException:
         r.parar(); raise
     finally:
-        for cam in abertas:
-            cam.fechar()
-        r.fechar()
+        if dono:
+            for cam in abertas:
+                cam.fechar()
+            r.fechar()
 
 
 if __name__ == "__main__":

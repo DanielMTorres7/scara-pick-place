@@ -315,6 +315,25 @@ class PickPlace:
             k["nome"] = next((o["nome"] for o in k["obs"] if o.get("nome")), "")
 
     # ---- executor da OS (job_os.JobOS): preparar -> pegar(caixa) por caixa -> estacionar ----
+    def referenciar(self):
+        """Z e J2 pelas chaves e J1 pela câmera (levado ao 0 corrigido); o primeiro preparar e o botão "Referenciar
+        braço" do sistema"""
+        r = self.r
+        # Z pela chave de cima (está a ~25 mm daqui: uma perda de passo só aparece quando bate numa chave)
+        r.referenciar_z(vbusca=20.0)
+        r.definir("z", Z_CHAVE)
+        self.ir_z(Z_ALTO)              # sai de cima da chave: o homing do J1 fotografa a ponta nessa altura
+        r.referenciar_j2()
+        # J1: o alinhamento à mão é só o ponto de partida; a câmera tem que confirmar (com o anel do rolamento) e
+        # corrigir. Sem confirmar, nada se move (23/10: seguir sem conferir levou o J1 além dos limites depois de a
+        # placa do braço reiniciar com a contagem zerada)
+        try:
+            homing_j1(r, self.cams, self.ms, VEL_SEGURA, ACEL_SEGURA)
+        except HomingFalhou as ex:
+            raise HomingFalhou("%s: alinhe o J1 à mão (reto, 0°) e rode de novo" % ex) from ex
+        r.ir_juntas(0.0, r.posicao("j2"), vmax=VEL_SEGURA, amax=ACEL_SEGURA)   # J1 no 0 corrigido: confere reto
+        self._homing_feito = True
+
     def preparar(self):
         """sobe, referencia o Z e o J2 pelas chaves e confere o J1 pela visão (só na primeira vez), fotografa a mesa com cada
         câmera e planeja: devolve as caixas de remédio (com "nome" se com_nomes)"""
@@ -323,20 +342,7 @@ class PickPlace:
         if r.posicao("z") < Z_ALTO:
             self.ir_z(Z_ALTO)
         if not self._homing_feito:
-            # Z pela chave de cima (está a ~25 mm daqui: uma perda de passo só aparece quando bate numa chave)
-            r.referenciar_z(vbusca=20.0)
-            r.definir("z", Z_CHAVE)
-            self.ir_z(Z_ALTO)              # sai de cima da chave: o homing do J1 fotografa a ponta nessa altura
-            r.referenciar_j2()
-            # J1: o alinhamento à mão é só o ponto de partida; a câmera tem que confirmar (com o anel do rolamento) e
-            # corrigir. Sem confirmar, nada se move (23/10: seguir sem conferir levou o J1 além dos limites depois de a
-            # placa do braço reiniciar com a contagem zerada)
-            try:
-                homing_j1(r, self.cams, self.ms, VEL_SEGURA, ACEL_SEGURA)
-            except HomingFalhou as ex:
-                raise HomingFalhou("%s: alinhe o J1 à mão (reto, 0°) e rode de novo" % ex) from ex
-            r.ir_juntas(0.0, r.posicao("j2"), vmax=VEL_SEGURA, amax=ACEL_SEGURA)   # J1 no 0 corrigido: confere reto
-            self._homing_feito = True
+            self.referenciar()
         for p in r.placas.values():
             p.eventos.clear()
         fs = fotos(r, self.cams, "fotos/pp_mesa")

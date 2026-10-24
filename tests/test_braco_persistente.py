@@ -61,3 +61,11 @@ def test_encerrar_fecha_o_braco_aberto():
     b.executor(True).fechar()
     b.encerrar()
     assert log[-1] == "fechar"
+
+
+def test_executor_expoe_o_pickplace():
+    """a recalibração troca os modelos no PickPlace (pp.ms = ...): precisa do objeto, não do intermediário"""
+    log = []
+    b = _braco(log)
+    ex = b.executor(True)
+    assert isinstance(ex.pickplace, PPFalso)

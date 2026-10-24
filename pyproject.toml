@@ -12,7 +12,11 @@ dependencies = [
 
 [project.optional-dependencies]
 # só para escolher caixas pelo nome (--nome / --ordem), via projeto only-vision
-nomes = ["python-dotenv>=1.0", "google-genai>=1.0"]
+nomes = [
+    "python-dotenv>=1.0",
+    "google-genai>=1.0",
+    "rapidocr-onnxruntime>=1.3",
+]
 
 [dependency-groups]
 dev = ["pytest>=8"]

@@ -80,3 +80,16 @@ def test_homing_do_j1_que_discorda_para_o_pick_place(monkeypatch):
     pp._homing_feito = False
     with pytest.raises(homing.HomingFalhou, match="alinhe o J1"):
         pp.preparar()
+
+
+def test_referenciar_sozinho_faz_o_homing_e_marca_feito(monkeypatch):
+    """botão "Referenciar braço" do sistema: o mesmo homing do primeiro preparar, sem foto nem caixas"""
+    chamadas = []
+    monkeypatch.setattr(pick_place, "homing_j1", lambda *a, **kw: chamadas.append("homing") or 0.0)
+    pp = PickPlace.__new__(PickPlace)
+    pp.r, pp.cams, pp.ms = ScaraFalso(chamadas), {}, {}
+    pp._homing_feito = False
+    pp.referenciar()
+    assert chamadas == ["ref_z", ("definir", "z", pick_place.Z_CHAVE), ("ir", "z", pick_place.Z_ALTO), "ref_j2",
+                        "homing", ("juntas", 0.0)]
+    assert pp._homing_feito

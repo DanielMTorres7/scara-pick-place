@@ -15,6 +15,7 @@ Uso: python servidor_os.py [--porta 8770]
 import argparse
 import hmac
 import json
+import signal
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -50,9 +51,14 @@ def valida_pedido(corpo):
         q = _int(it.get("quantidade"), 1, "itens[].quantidade")
         limpos[nome] = limpos.get(nome, 0) + q
     limpos = [{"nome": n, "quantidade": q} for n, q in limpos.items()]
-    return {"os": os_.strip(), "cliente": str(corpo.get("cliente", "")), "itens": limpos,
-            "quantidade": _int(corpo.get("quantidade", 0), 0, "quantidade"),
-            "separadas": _int(corpo.get("separadas", 0), 0, "separadas")}
+    todas = corpo.get("todas", False)
+    if not isinstance(todas, bool):
+        raise ValueError("todas: true ou false")
+    quantidade = _int(corpo.get("quantidade", 0), 0, "quantidade")
+    if todas:                          # "separar tudo": pega o que detectar, sem lista (sem Gemini) nem quantidade
+        limpos, quantidade = [], 0
+    return {"os": os_.strip(), "cliente": str(corpo.get("cliente", "")), "itens": limpos, "quantidade": quantidade,
+            "separadas": _int(corpo.get("separadas", 0), 0, "separadas"), "todas": todas}
 
 
 def callback_de(emr_url, os_):
@@ -60,8 +66,9 @@ def callback_de(emr_url, os_):
     return "%s/api/robo/%s" % (emr_url.rstrip("/"), urllib.parse.quote(os_, safe=""))
 
 
-def cria_servidor(porta, conexao, novo_job):
-    estado = {"job": None, "thread": None}
+def cria_servidor(porta, conexao, novo_job, nova_calibracao=None):
+    """nova_calibracao(tipo): trabalho de calibração (calibracao.Calibracao) do POST /calibrar; ocupa o braço como uma OS"""
+    estado = {"job": None, "thread": None, "calib": None}
     trava = threading.Lock()
 
     def ocupado():
@@ -89,8 +96,11 @@ def cria_servidor(porta, conexao, novo_job):
                 return self._responde(404, {"erro": "rota"})
             with trava:
                 vivo = ocupado()
-                return self._responde(200, {"ocupado": vivo, "os": estado["job"].os if vivo else None,
-                                            "conectado": conexao.conectada})
+                job, calib = estado["job"], estado["calib"]
+                return self._responde(200, {"ocupado": vivo, "os": job.os if vivo else None,
+                                            "conectado": conexao.conectada,
+                                            "tarefa": (getattr(job, "tarefa", None) or "os") if vivo else None,
+                                            "calibracao": calib.resultado if calib is not None else None})
 
         def _corpo(self):
             """JSON do corpo; levanta ValueError (vira 400) se o tamanho ou o JSON forem inválidos"""
@@ -122,16 +132,52 @@ def cria_servidor(porta, conexao, novo_job):
             print("braço conectado ao sistema em %s" % emr_url)
             return self._responde(200, {"conectado": True})
 
+        def _autorizado(self):
+            """None se pode seguir; senão a resposta de erro já enviada"""
+            if not conexao.conectada:
+                return self._responde(503, {"erro": "braço não conectado: use 'Conectar braço' no sistema"}) or True
+            auth = self.headers.get("Authorization", "")
+            if not hmac.compare_digest(auth.encode(), ("Bearer " + conexao.token).encode()):
+                return self._responde(401, {"erro": "token"}) or True
+            return None
+
+        def _ocupado_msg(self):
+            job = estado["job"]
+            if getattr(job, "tarefa", None):
+                return "braço ocupado calibrando (%s)" % job.tarefa
+            return "braço ocupado com a OS %s" % job.os
+
+        def _calibrar(self):
+            if nova_calibracao is None:
+                return self._responde(404, {"erro": "rota"})
+            if self._autorizado():
+                return None
+            try:
+                corpo = self._corpo()
+                if not isinstance(corpo, dict):
+                    raise ValueError("corpo deve ser um objeto JSON")
+                calib = nova_calibracao(corpo.get("tipo"))
+            except ValueError as e:
+                return self._responde(400, {"erro": str(e)})
+            espera_encerrar()
+            with trava:
+                if ocupado():
+                    return self._responde(409, {"erro": self._ocupado_msg()})
+                t = threading.Thread(target=calib.rodar, daemon=True, name="calibrar-" + calib.tarefa)
+                estado.update(job=calib, thread=t, calib=calib)
+                t.start()
+            print("calibração pedida pelo sistema: %s" % calib.tarefa)
+            return self._responde(202, {"aceito": True, "tipo": calib.tarefa})
+
         def do_POST(self):
             if self.path == "/conectar":
                 return self._conectar()
+            if self.path == "/calibrar":
+                return self._calibrar()
             if self.path != "/os":
                 return self._responde(404, {"erro": "rota"})
-            if not conexao.conectada:
-                return self._responde(503, {"erro": "braço não conectado: use 'Conectar braço' no sistema"})
-            auth = self.headers.get("Authorization", "")
-            if not hmac.compare_digest(auth.encode(), ("Bearer " + conexao.token).encode()):
-                return self._responde(401, {"erro": "token"})
+            if self._autorizado():
+                return None
             try:
                 pedido = valida_pedido(self._corpo())
             except ValueError as e:      # JSONDecodeError também é ValueError
@@ -141,7 +187,7 @@ def cria_servidor(porta, conexao, novo_job):
                 if ocupado():
                     if estado["job"].os == pedido["os"]:
                         return self._responde(202, {"aceito": True, "retomada": True})
-                    return self._responde(409, {"erro": "braço ocupado com a OS %s" % estado["job"].os})
+                    return self._responde(409, {"erro": self._ocupado_msg()})
                 job = novo_job(pedido)
                 t = threading.Thread(target=job.rodar, daemon=True, name="os-" + pedido["os"])
                 estado.update(job=job, thread=t)
@@ -153,6 +199,17 @@ def cria_servidor(porta, conexao, novo_job):
             pass
 
     return ThreadingHTTPServer(("0.0.0.0", porta), Handler)
+
+
+def _encerra(sinal, quadro):
+    raise KeyboardInterrupt
+
+
+def instala_sinais():
+    """SIGTERM e SIGINT encerram pelo KeyboardInterrupt (o finally do main fecha o braço e corta a energia). Subido em
+    segundo plano (nohup ... &) o processo herda o SIGINT ignorado; o SIGTERM o matava sem o finally (23/10)."""
+    signal.signal(signal.SIGTERM, _encerra)
+    signal.signal(signal.SIGINT, _encerra)
 
 
 def main():
@@ -172,11 +229,14 @@ def main():
 
     braco = BracoPersistente(PickPlace)    # só a primeira OS abre e referencia; as seguintes vão direto
 
+    from calibracao import Calibracao
+
     def novo_job(pedido):
         return JobOS(pedido, lambda: braco.executor(com_nomes=bool(pedido["itens"])),
                      Sistema(callback_de(conexao.emr_url, pedido["os"]), conexao.token), progresso)
 
-    srv = cria_servidor(args.porta, conexao, novo_job)
+    srv = cria_servidor(args.porta, conexao, novo_job, lambda tipo: Calibracao(tipo, braco))
+    instala_sinais()
     estado = "conectado a %s" % conexao.emr_url if conexao.conectada else "aguardando 'Conectar braço' no sistema"
     print("braço esperando OS em http://0.0.0.0:%d/os (%s)" % (args.porta, estado))
     try:

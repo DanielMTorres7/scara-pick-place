@@ -216,3 +216,35 @@ def test_encerrando_marcado_ao_cancelar(tmp_path):
     assert job.encerrando is False
     job.rodar()
     assert job.encerrando is True
+
+
+
+def _job_todas(tmp_path, ex, sis):
+    pedido = {"os": "OS-T", "itens": [], "quantidade": 0, "separadas": 0, "todas": True}
+    return JobOS(pedido, lambda: ex, sis, Progresso(tmp_path / "p.json"), espera_pausa=0, dormir=lambda s: None)
+
+
+def test_todas_pega_tudo_o_que_ve_ate_a_mesa_esvaziar(tmp_path):
+    """23/10: modo do sistema "separar tudo": sem lista e sem quantidade; foto, pega tudo, foto de novo, até não ter
+    mais caixa; então conclui com o total"""
+    ex = ExecutorFalso([[_cx("", 1), _cx("", 2)], [_cx("", 3)], []])
+    sis = SistemaFalso()
+    _job_todas(tmp_path, ex, sis).rodar()
+    assert [c for c in ex.chamadas if c[0] == "pegar"] == [("pegar", ""), ("pegar", ""), ("pegar", "")]
+    assert _tipos(sis)[-1] == ("concluida", 3)
+    assert "faltando" not in [t for t, _ in _tipos(sis)]      # 23/10: mandava "faltando" (pausa) entre as fotos
+    assert ex.chamadas.count("preparar") == 3
+
+
+def test_todas_com_so_caixas_fora_do_alcance_conclui(tmp_path):
+    ex = ExecutorFalso([[_cx("", 1)]], falhas={1.0: CaixaInalcancavel("longe")})
+    sis = SistemaFalso()
+    _job_todas(tmp_path, ex, sis).rodar()
+    assert _tipos(sis) == [("concluida", 0)]
+
+
+def test_todas_nao_fica_em_laco_se_a_caixa_nunca_sai_da_mesa(tmp_path):
+    ex = ExecutorFalso([[_cx("", 1)]])            # a mesma caixa em toda foto (pega falhando)
+    sis = SistemaFalso()
+    _job_todas(tmp_path, ex, sis).rodar()
+    assert ex.chamadas.count("preparar") <= 10 and _tipos(sis)[-1][0] == "concluida"
